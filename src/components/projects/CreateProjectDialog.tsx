@@ -2,9 +2,10 @@ import { FormEvent, useState } from "react";
 
 type CreateProjectDialogProps = {
   onClose: () => void;
+  onCreate: (projectName: string) => void;
 };
 
-export function CreateProjectDialog({ onClose }: CreateProjectDialogProps) {
+export function CreateProjectDialog({ onClose, onCreate }: CreateProjectDialogProps) {
   const [name, setName] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -12,8 +13,7 @@ export function CreateProjectDialog({ onClose }: CreateProjectDialogProps) {
     const trimmedName = name.trim();
     if (!trimmedName) return;
 
-    console.log("Project creation will be connected to Tauri:", trimmedName);
-    onClose();
+    onCreate(trimmedName);
   }
 
   return (
