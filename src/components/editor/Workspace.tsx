@@ -43,10 +43,11 @@ function getFileIcon(name: string) {
     case "tsx":
       return "TS";
     case "js":
-    case "jsx":n      return "JS";
+    case "jsx":
+      return "JS";
     case "json":
       return "{}";
-    case "css"::
+    case "css":
       return "#";
     case "md":
       return "M";
@@ -60,7 +61,7 @@ function getFileIcon(name: string) {
 export function Workspace({ projectName, onBackToHome }: WorkspaceProps) {
   const [files, setFiles] = useState(initialFiles);
   const [activeFileName, setActiveFileName] = useState(initialFiles[0].name);
-  const [sidebarWidth, setSidebarWidth] = useState(248);
+  const sidebarWidth = 248;
 
   const activeFile = useMemo(
     () => files.find((file) => file.name === activeFileName) ?? files[0],
