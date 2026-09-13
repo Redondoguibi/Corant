@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+target/
+
+# Build
+dist/
+build/
+
+# Tauri
+src-tauri/target/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary
+*.tmp
+*.temp
+
+# Generated
+coverage/
