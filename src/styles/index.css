@@ -10,3 +10,214 @@
 html, body, #app { width: 100%; min-width: 100%; height: 100%; min-height: 100%; margin: 0; }
 body { overflow: hidden; background: #0a0a0a; }
 button, input { font: inherit; }
+
+/* Corant visual identity */
+.welcome-screen {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.welcome-screen::before,
+.welcome-screen::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(2px);
+}
+
+.welcome-screen::before {
+  width: 420px;
+  height: 420px;
+  top: -150px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(255, 55, 55, .22), rgba(255, 55, 55, 0) 70%);
+}
+
+.welcome-screen::after {
+  width: 520px;
+  height: 520px;
+  bottom: -260px;
+  left: -220px;
+  background: radial-gradient(circle, rgba(185, 0, 24, .16), rgba(185, 0, 24, 0) 70%);
+}
+
+.welcome-content {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 92, 92, .14);
+  background:
+    linear-gradient(145deg, rgba(24, 16, 17, .92), rgba(11, 11, 13, .88)),
+    radial-gradient(circle at 10% 0%, rgba(255, 53, 53, .12), transparent 38%);
+  box-shadow:
+    0 35px 100px rgba(0, 0, 0, .52),
+    0 0 70px rgba(190, 0, 20, .08);
+}
+
+.welcome-content::after {
+  content: "";
+  position: absolute;
+  width: 280px;
+  height: 280px;
+  right: -100px;
+  bottom: -150px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 33, 45, .12), transparent 70%);
+  pointer-events: none;
+}
+
+.welcome-copy {
+  position: relative;
+}
+
+.welcome-copy h1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 18px;
+  letter-spacing: -.045em;
+}
+
+.welcome-copy h1::before {
+  content: "";
+  display: inline-block;
+  width: 74px;
+  height: 74px;
+  flex: 0 0 74px;
+  background: url("/corant-dye.svg") center / contain no-repeat;
+  filter: drop-shadow(0 12px 20px rgba(117, 0, 14, .42));
+}
+
+.welcome-description {
+  max-width: 610px;
+}
+
+.welcome-actions {
+  position: relative;
+  z-index: 2;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #ff4141 0%, #e01625 52%, #a90013 100%);
+  box-shadow: 0 12px 34px rgba(224, 22, 37, .24);
+}
+
+.primary-button:hover:not(:disabled) {
+  box-shadow: 0 15px 40px rgba(255, 35, 48, .32);
+}
+
+.welcome-meta {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 22px;
+  color: #666;
+  font-size: .68rem;
+  letter-spacing: .02em;
+}
+
+.welcome-meta-dot {
+  width: 3px;
+  height: 3px;
+  flex: 0 0 3px;
+  border-radius: 50%;
+  background: #843036;
+}
+
+/* Workspace branding */
+.workspace-brand {
+  gap: 8px;
+}
+
+.workspace-brand-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.workspace-brand-name::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  background: url("/corant-dye.svg") center / contain no-repeat;
+  filter: drop-shadow(0 4px 7px rgba(117, 0, 14, .4));
+}
+
+.workspace-titlebar {
+  background:
+    linear-gradient(90deg, rgba(22, 13, 14, .98), rgba(15, 15, 15, .97) 38%, rgba(19, 14, 15, .98));
+}
+
+.workspace-menubar {
+  background: linear-gradient(90deg, #141111, #121212 52%, #141111);
+}
+
+.workspace-sidebar {
+  background:
+    linear-gradient(180deg, #141112 0%, #101010 100%);
+}
+
+.sidebar-heading {
+  color: #898989;
+}
+
+.sidebar-heading::before {
+  content: "";
+  position: absolute;
+}
+
+.tree-project-name {
+  border: 1px solid rgba(255, 75, 75, .07);
+  border-radius: 8px;
+  background: rgba(255, 42, 42, .035);
+}
+
+.tree-file.is-active {
+  background: linear-gradient(90deg, rgba(255, 55, 55, .14), rgba(255, 55, 55, .045));
+  box-shadow: inset 2px 0 0 rgba(255, 78, 78, .88);
+}
+
+.file-icon {
+  text-shadow: 0 0 14px rgba(255, 68, 68, .14);
+}
+
+.editor-tabs {
+  background: linear-gradient(180deg, #151515, #111111);
+}
+
+.editor-tab.is-active {
+  background: linear-gradient(180deg, #191919, #141414);
+  box-shadow: inset 0 -2px 0 #ff4242, 0 -5px 20px rgba(255, 30, 30, .025);
+}
+
+.editor-empty-state {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(196, 11, 29, .075), transparent 28%),
+    linear-gradient(145deg, #0f0f0f, #101010);
+}
+
+.editor-empty-state::before {
+  content: "";
+  width: 86px;
+  height: 86px;
+  margin-bottom: 8px;
+  border-radius: 24px;
+  background: rgba(255, 35, 35, .035) url("/corant-dye.svg") center / 66px 66px no-repeat;
+  border: 1px solid rgba(255, 65, 65, .08);
+  box-shadow: 0 16px 40px rgba(107, 0, 14, .12);
+}
+
+.workspace-statusbar {
+  background: linear-gradient(90deg, #8d1b1f 0%, #5d1518 62%, #7b181d 100%);
+}
+
+@media (max-width: 760px) {
+  .welcome-content h1::before { width: 56px; height: 56px; flex-basis: 56px; }
+  .welcome-meta { flex-wrap: wrap; }
+}
