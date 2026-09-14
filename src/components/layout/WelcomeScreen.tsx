@@ -1,8 +1,9 @@
 type WelcomeScreenProps = {
   onCreateProject: () => void;
+  onOpenProject: () => void;
 };
 
-export function WelcomeScreen({ onCreateProject }: WelcomeScreenProps) {
+export function WelcomeScreen({ onCreateProject, onOpenProject }: WelcomeScreenProps) {
   return (
     <main className="welcome-screen">
       <section className="welcome-content">
@@ -12,10 +13,10 @@ export function WelcomeScreen({ onCreateProject }: WelcomeScreenProps) {
           Um espaço desktop para organizar, editar e executar seus projetos.
         </p>
         <div className="welcome-actions">
-          <button className="primary-button" onClick={onCreateProject}>
+          <button className="primary-button" type="button" onClick={onCreateProject}>
             Criar projeto
           </button>
-          <button className="secondary-button" type="button">
+          <button className="secondary-button" type="button" onClick={onOpenProject}>
             Abrir projeto
           </button>
         </div>
