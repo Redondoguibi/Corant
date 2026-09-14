@@ -23,10 +23,9 @@ function getLanguage(name: string) {
 
   switch (extension) {
     case "ts":
+    case "tsx":
       return "typescript";
-    case "tsx":n      return "typescript";
     case "js":
-      return "javascript";
     case "jsx":
       return "javascript";
     case "json":
@@ -234,7 +233,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     return { paddingLeft: `${12 + depth * 16}px` };
   }
 
-  async function refreshProject() {
+  function refreshProject() {
     setRefreshKey((current) => current + 1);
   }
 
