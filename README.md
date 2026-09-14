@@ -53,13 +53,13 @@ Inclui:
 - atualizar a árvore do projeto;
 - abrir arquivos de texto reais;
 - detecção básica de linguagem por extensão;
-- integração com o autosave inicial.
+- integração com o autosave.
 
 O Explorer é implementado principalmente em [`Workspace.tsx`](src/components/editor/Workspace.tsx) e no serviço [`projectFilesystem.ts`](src/services/projectFilesystem.ts).
 
 ### ✅ Parte 2 — Sistema de abas
 
-O editor agora possui uma estrutura de múltiplas abas integrada ao Explorer.
+O editor possui uma estrutura de múltiplas abas integrada ao Explorer.
 
 Inclui:
 
@@ -75,22 +75,30 @@ Inclui:
 - confirmação antes de fechar uma aba com alterações pendentes;
 - atualização das abas ao renomear arquivos;
 - remoção segura das abas quando arquivos/pastas abertos são excluídos;
-- integração com o estado de autosave existente.
+- integração com o autosave e recuperação.
 
-> A Parte 2 implementa a base das abas. Recursos como `Ctrl + Tab`, `Ctrl + W`, menu de contexto e grupos/divisão de editores continuam planejados para etapas posteriores.
+> Recursos como `Ctrl + Tab`, `Ctrl + W`, menu de contexto e grupos/divisão de editores continuam planejados para etapas posteriores.
 
 ### 🚧 Parte 3 — Autosave + recuperação
 
-Existe um autosave inicial, mas o sistema robusto ainda será desenvolvido.
+A primeira implementação de autosave foi evoluída para uma camada inicial de recuperação local.
 
-A etapa deverá adicionar:
+O Corant agora mantém snapshots de recuperação locais enquanto o usuário edita um arquivo. Se o conteúdo recuperável for diferente da versão existente no disco quando o arquivo for aberto novamente, o usuário pode escolher restaurá-lo ou continuar com a versão salva.
 
-- persistência mais confiável;
-- recuperação após encerramento inesperado;
-- recuperação após crash/forçamento de encerramento;
-- diferenciação entre arquivo salvo no disco e estado recuperável;
-- limpeza de dados de recuperação depois da decisão do usuário;
-- integração completa com abas modificadas.
+Inclui atualmente:
+
+- autosave após aproximadamente 500 ms de inatividade;
+- snapshot de recuperação local durante a edição;
+- recuperação de conteúdo após encerramento inesperado/crash;
+- comparação entre snapshot recuperável e arquivo salvo no disco;
+- confirmação antes de restaurar uma versão recuperável;
+- limpeza do snapshot após salvamento bem-sucedido ou descarte;
+- integração com indicadores de alterações das abas;
+- recuperação mantida localmente, sem backend.
+
+A implementação inicial de recuperação está em [`recoveryStore.ts`](src/services/recoveryStore.ts), integrada ao [`Workspace.tsx`](src/components/editor/Workspace.tsx).
+
+> Esta é a primeira versão robusta da recuperação. Melhorias futuras podem substituir o armazenamento do WebView por um journal nativo/Tauri se isso se mostrar necessário.
 
 ### ⏳ Parte 4 — Busca global
 
@@ -227,7 +235,7 @@ Corant/
 ├── src/                  # frontend React/TypeScript
 │   ├── app/              # estado principal da aplicação
 │   ├── components/       # componentes da interface
-│   ├── services/         # serviços do frontend, incluindo filesystem
+│   ├── services/         # serviços do frontend, incluindo filesystem e recovery
 │   └── styles/           # estilos globais e do workspace
 ├── src-tauri/            # backend nativo Tauri/Rust
 ├── public/               # assets públicos, incluindo a identidade visual
