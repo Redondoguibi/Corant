@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="dye" cx="34%" cy="28%" r="78%">
+      <stop offset="0%" stop-color="#ff6b6b"/>
+      <stop offset="28%" stop-color="#f12b35"/>
+      <stop offset="62%" stop-color="#c20d1b"/>
+      <stop offset="100%" stop-color="#69000b"/>
+    </radialGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd1d1" stop-opacity=".95"/>
+      <stop offset="55%" stop-color="#ff6b72" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#ff252f" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="deep" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#a50012" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#320006" stop-opacity=".48"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="18" stdDeviation="16" flood-color="#4b0007" flood-opacity=".32"/>
+    </filter>
+    <filter id="soft">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <path d="M256 62 C287 104 325 121 351 151 C378 182 376 215 405 242 C435 270 429 322 397 349 C366 376 353 397 329 428 C307 456 275 468 246 451 C220 436 201 414 174 408 C136 399 100 375 91 340 C81 304 105 277 117 248 C130 217 116 187 138 160 C159 134 195 128 215 101 C229 82 241 68 256 62 Z" fill="url(#dye)"/>
+    <path d="M126 298 C151 269 153 229 178 199 C201 172 231 170 255 146 C276 126 291 103 302 91 C310 130 345 151 356 184 C368 219 344 244 360 276 C373 303 365 330 338 351 C309 374 298 409 263 414 C231 418 207 386 179 376 C151 366 113 342 126 298 Z" fill="url(#deep)"/>
+    <path d="M164 187 C188 158 221 154 242 128 C253 114 263 99 270 83 C279 118 260 148 239 169 C219 189 197 198 181 222 C167 242 162 263 146 274 C143 244 146 211 164 187 Z" fill="url(#shine)"/>
+    <path d="M306 177 C326 194 334 215 325 232 C318 246 299 250 286 240 C272 229 273 210 282 196 C289 185 297 179 306 177 Z" fill="#ff777d" opacity=".32" filter="url(#soft)"/>
+  </g>
+  <g fill="#ffd7d9" opacity=".82">
+    <circle cx="191" cy="221" r="5"/>
+    <circle cx="211" cy="202" r="3"/>
+    <circle cx="182" cy="247" r="2.5"/>
+  </g>
+</svg>
