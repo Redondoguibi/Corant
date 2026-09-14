@@ -12,6 +12,11 @@ import {
   saveProjectFile,
   type ProjectFile,
 } from "../../services/projectFilesystem";
+import {
+  clearRecoverySnapshot,
+  getRecoverySnapshot,
+  saveRecoverySnapshot,
+} from "../../services/recoveryStore";
 
 type WorkspaceProps = {
   projectName: string;
@@ -330,9 +335,35 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
       setError(null);
 
       try {
-        const content = await readProjectFile(activeFile.path);
-
+        const diskContent = await readProjectFile(activeFile.path);
         if (cancelled) return;
+
+        const recovery = getRecoverySnapshot(projectPath, activeFile.path);
+        let content = diskContent;
+        let recovered = false;
+
+        if (recovery && recovery.content !== diskContent) {
+          const restore = await confirm(
+            `O Corant encontrou uma versão recuperável de “${activeFile.name}” criada em ${new Date(recovery.updatedAt).toLocaleString()}. Deseja restaurar essa versão?`,
+            {
+              title: "Recuperar alterações",
+              kind: "warning",
+              okLabel: "Restaurar",
+              cancelLabel: "Usar arquivo salvo",
+            },
+          );
+
+          if (cancelled) return;
+
+          if (restore) {
+            content = recovery.content;
+            recovered = true;
+          } else {
+            clearRecoverySnapshot(projectPath, activeFile.path);
+          }
+        } else if (recovery) {
+          clearRecoverySnapshot(projectPath, activeFile.path);
+        }
 
         setFileContents((current) => ({
           ...current,
@@ -343,12 +374,12 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         }));
         setOriginalContents((current) => ({
           ...current,
-          [activeFile.path]: content,
+          [activeFile.path]: diskContent,
         }));
         setDirtyPaths((current) => {
-          if (!current.has(activeFile.path)) return current;
           const next = new Set(current);
-          next.delete(activeFile.path);
+          if (recovered) next.add(activeFile.path);
+          else next.delete(activeFile.path);
           return next;
         });
       } catch (readError) {
@@ -363,7 +394,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     return () => {
       cancelled = true;
     };
-  }, [activeFile, fileContents]);
+  }, [activeFile, fileContents, projectPath]);
 
   useEffect(() => {
     if (!activeFile || !activeContent) return;
@@ -386,6 +417,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
       void saveProjectFile(activeFile.path, activeContent.content)
         .then(() => {
           markSaved(activeFile.path, activeContent.content);
+          clearRecoverySnapshot(projectPath, activeFile.path);
           setSaveState("saved");
         })
         .catch(() => {
@@ -395,12 +427,13 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     }, 500);
 
     return () => window.clearTimeout(timer);
-  }, [activeFile, activeContent, originalContents]);
+  }, [activeFile, activeContent, originalContents, projectPath]);
 
   function updateActiveFile(value: string) {
     if (!activeFile) return;
 
     markDirty(activeFile.path);
+    saveRecoverySnapshot(projectPath, activeFile.path, value);
     setFileContents((current) => ({
       ...current,
       [activeFile.path]: {
@@ -550,6 +583,10 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
       const deletedTabs = openTabPaths.filter(affectsPath);
       const nextTabs = openTabPaths.filter((path) => !affectsPath(path));
+
+      for (const path of deletedTabs) {
+        clearRecoverySnapshot(projectPath, path);
+      }
 
       setOpenTabPaths(nextTabs);
       setFileContents((current) => {
