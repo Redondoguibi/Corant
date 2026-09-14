@@ -1,19 +1,42 @@
 import { FormEvent, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 
 type CreateProjectDialogProps = {
   onClose: () => void;
-  onCreate: (projectName: string) => void;
+  onCreate: (projectName: string, parentPath: string) => Promise<void>;
 };
 
 export function CreateProjectDialog({ onClose, onCreate }: CreateProjectDialogProps) {
   const [name, setName] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedName = name.trim();
-    if (!trimmedName) return;
 
-    onCreate(trimmedName);
+    const trimmedName = name.trim();
+    if (!trimmedName || isCreating) return;
+
+    setError(null);
+    setIsCreating(true);
+
+    try {
+      const selectedParent = await open({
+        directory: true,
+        multiple: false,
+        title: "Escolha onde criar o projeto",
+      });
+
+      if (!selectedParent || Array.isArray(selectedParent)) {
+        return;
+      }
+
+      await onCreate(trimmedName, selectedParent);
+    } catch (creationError) {
+      setError(creationError instanceof Error ? creationError.message : String(creationError));
+    } finally {
+      setIsCreating(false);
+    }
   }
 
   return (
@@ -46,14 +69,17 @@ export function CreateProjectDialog({ onClose, onCreate }: CreateProjectDialogPr
             onChange={(event) => setName(event.target.value)}
             placeholder="Meu projeto"
             autoFocus
+            disabled={isCreating}
           />
 
+          {error && <p className="dialog-error">{error}</p>}
+
           <div className="dialog-actions">
-            <button className="secondary-button" type="button" onClick={onClose}>
+            <button className="secondary-button" type="button" onClick={onClose} disabled={isCreating}>
               Cancelar
             </button>
-            <button className="primary-button" type="submit" disabled={!name.trim()}>
-              Criar projeto
+            <button className="primary-button" type="submit" disabled={!name.trim() || isCreating}>
+              {isCreating ? "Criando..." : "Escolher local e criar"}
             </button>
           </div>
         </form>
