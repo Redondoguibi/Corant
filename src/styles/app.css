@@ -1,5 +1,8 @@
 .corant-app {
+  width: 100%;
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
   background:
     radial-gradient(circle at 15% 15%, rgba(255, 72, 72, 0.16), transparent 32%),
     radial-gradient(circle at 85% 80%, rgba(255, 24, 24, 0.08), transparent 35%),
@@ -36,6 +39,7 @@ button { border: 0; cursor: pointer; }
   flex-direction: column;
   width: 100%;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: #101010;
   color: #e9e9e9;
@@ -77,6 +81,8 @@ button { border: 0; cursor: pointer; }
 .workspace-titlebar-actions { justify-content: flex-end; }
 .save-indicator { color: #8f8f8f; font-size: .75rem; }
 .save-indicator::first-letter { color: #ff4d4d; }
+.save-indicator-saving { color: #d8a2a2; }
+.save-indicator-error { color: #ff6a6a; }
 
 .workspace-back-button {
   display: grid;
@@ -109,12 +115,13 @@ button { border: 0; cursor: pointer; }
 }
 .workspace-menubar button:hover { color: #fff; background: rgba(255,255,255,.07); }
 
-.workspace-body { display: flex; min-height: 0; flex: 1; }
+.workspace-body { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; }
 .workspace-sidebar {
   display: flex;
   flex-direction: column;
   min-width: 210px;
   max-width: 360px;
+  min-height: 0;
   border-right: 1px solid rgba(255,255,255,.07);
   background: #111111;
 }
@@ -123,6 +130,7 @@ button { border: 0; cursor: pointer; }
 .sidebar-heading {
   justify-content: space-between;
   height: 38px;
+  flex: 0 0 38px;
   padding: 0 10px 0 14px;
   color: #7f7f7f;
   font-size: .69rem;
@@ -141,14 +149,14 @@ button { border: 0; cursor: pointer; }
 }
 .sidebar-heading-actions button:hover { color: #fff; background: rgba(255,255,255,.06); }
 
-.project-tree { min-height: 0; flex: 1; overflow: auto; padding: 3px 7px 10px; }
+.project-tree { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 3px 7px 10px; }
 .tree-project-name {
   padding: 7px 8px;
   color: #dadada;
   font-size: .8rem;
   font-weight: 600;
 }
-.tree-files { display: grid; gap: 1px; padding-left: 9px; }
+.tree-files { display: grid; gap: 1px; padding-left: 0; }
 .tree-file {
   display: flex;
   align-items: center;
@@ -162,8 +170,9 @@ button { border: 0; cursor: pointer; }
   text-align: left;
   font-size: .8rem;
 }
-.tree-file:hover { color: #eee; background: rgba(255,255,255,.05); }
+.tree-file:hover:not(:disabled) { color: #eee; background: rgba(255,255,255,.05); }
 .tree-file.is-active { color: #fff; background: rgba(255,62,62,.11); }
+.tree-file:disabled { cursor: default; color: #777; }
 
 .file-icon {
   display: inline-grid;
@@ -178,14 +187,23 @@ button { border: 0; cursor: pointer; }
 .sidebar-footer {
   display: flex;
   justify-content: space-between;
+  flex: 0 0 auto;
   padding: 9px 12px;
   border-top: 1px solid rgba(255,255,255,.055);
   color: #656565;
   font-size: .67rem;
 }
+.tree-message, .tree-error {
+  padding: 12px 10px;
+  color: #777;
+  font-size: .76rem;
+  line-height: 1.5;
+}
+.tree-error { color: #ff7575; white-space: pre-wrap; overflow-wrap: anywhere; }
 
-.workspace-editor-area { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; background: #0f0f0f; }
+.workspace-editor-area { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; background: #0f0f0f; }
 .editor-tabs {
+  min-width: 0;
   min-height: 39px;
   flex: 0 0 39px;
   overflow: auto hidden;
@@ -209,6 +227,7 @@ button { border: 0; cursor: pointer; }
 
 .editor-toolbar {
   justify-content: space-between;
+  min-width: 0;
   min-height: 32px;
   flex: 0 0 32px;
   gap: 12px;
@@ -219,9 +238,27 @@ button { border: 0; cursor: pointer; }
   font-size: .68rem;
 }
 .editor-breadcrumbs, .editor-toolbar-actions { gap: 8px; white-space: nowrap; }
+.editor-breadcrumbs { min-width: 0; overflow: hidden; }
+.editor-breadcrumbs span { overflow: hidden; text-overflow: ellipsis; }
 .editor-breadcrumbs span:last-child { color: #b2b2b2; }
 
-.monaco-host { min-height: 0; flex: 1; }
+.monaco-host { min-width: 0; min-height: 0; flex: 1 1 auto; }
+.editor-empty-state {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  color: #777;
+}
+.editor-empty-state strong { color: #d8d8d8; font-size: .98rem; }
+.editor-empty-state span { max-width: 420px; color: #666; font-size: .78rem; line-height: 1.5; }
+
 .workspace-statusbar {
   justify-content: space-between;
   min-height: 25px;
