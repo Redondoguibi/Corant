@@ -1,4 +1,5 @@
 use std::path::Path;
+use tauri_plugin_fs::FsExt;
 
 #[tauri::command]
 fn allow_project_directory(app: tauri::AppHandle, path: String) -> Result<String, String> {
