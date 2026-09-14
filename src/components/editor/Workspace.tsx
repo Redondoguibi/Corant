@@ -121,11 +121,6 @@ function getFileIcon(name: string) {
   }
 }
 
-function getParentRelativePath(relativePath: string) {
-  const separatorIndex = relativePath.lastIndexOf("/");
-  return separatorIndex === -1 ? "" : relativePath.slice(0, separatorIndex);
-}
-
 function getParentDirectoryPath(entry: ProjectFile, projectPath: string) {
   if (entry.kind === "directory") {
     return entry.path;
@@ -136,14 +131,21 @@ function getParentDirectoryPath(entry: ProjectFile, projectPath: string) {
 }
 
 function collectDirectoryPaths(entries: ProjectFile[]) {
-  return new Set(entries.filter((entry) => entry.kind === "directory").map((entry) => entry.relativePath));
+  return new Set(
+    entries
+      .filter((entry) => entry.kind === "directory")
+      .map((entry) => entry.relativePath),
+  );
 }
 
 export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceProps) {
   const [entries, setEntries] = useState<ProjectFile[]>([]);
+  const [openTabPaths, setOpenTabPaths] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
   const [selectedEntryPath, setSelectedEntryPath] = useState<string | null>(null);
   const [fileContents, setFileContents] = useState<Record<string, FileContent>>({});
+  const [originalContents, setOriginalContents] = useState<Record<string, string>>({});
+  const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +160,13 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     [entries],
   );
 
+  const openTabs = useMemo(
+    () => openTabPaths
+      .map((path) => files.find((file) => file.path === path))
+      .filter((file): file is ProjectFile => Boolean(file)),
+    [files, openTabPaths],
+  );
+
   const selectedEntry = useMemo(
     () => entries.find((entry) => entry.path === selectedEntryPath) ?? null,
     [entries, selectedEntryPath],
@@ -170,50 +179,88 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
   const activeContent = activeFile ? fileContents[activeFile.path] : null;
 
-  const reloadProject = async () => {
-    setIsLoading(true);
-    setError(null);
+  function markDirty(path: string) {
+    setDirtyPaths((current) => {
+      if (current.has(path)) return current;
+      const next = new Set(current);
+      next.add(path);
+      return next;
+    });
+  }
 
-    try {
-      const projectEntries = await listProjectEntries(projectPath);
-      setEntries(projectEntries);
+  function markSaved(path: string, content: string) {
+    setOriginalContents((current) => ({
+      ...current,
+      [path]: content,
+    }));
+    setDirtyPaths((current) => {
+      if (!current.has(path)) return current;
+      const next = new Set(current);
+      next.delete(path);
+      return next;
+    });
+  }
 
-      const directoryPaths = collectDirectoryPaths(projectEntries);
-      setExpandedDirectories((current) => {
-        const next = new Set<string>();
-        for (const relativePath of current) {
-          if (directoryPaths.has(relativePath)) {
-            next.add(relativePath);
-          }
-        }
-        return next;
-      });
+  function openFile(file: ProjectFile) {
+    setSelectedEntryPath(file.path);
+    setActiveFilePath(file.path);
+    setOpenTabPaths((current) =>
+      current.includes(file.path) ? current : [...current, file.path],
+    );
+  }
 
-      setActiveFilePath((currentPath) => {
-        if (pendingActivePath && projectEntries.some((entry) => entry.path === pendingActivePath)) {
-          const nextPath = pendingActivePath;
-          setPendingActivePath(null);
-          return nextPath;
-        }
+  async function closeTab(path: string) {
+    const isDirty = dirtyPaths.has(path);
 
-        if (currentPath && projectEntries.some((entry) => entry.path === currentPath)) {
-          return currentPath;
-        }
-
-        return projectEntries.find((entry) => entry.kind === "file")?.path ?? null;
-      });
-
-      setSelectedEntryPath((currentPath) =>
-        currentPath && projectEntries.some((entry) => entry.path === currentPath)
-          ? currentPath
-          : null,
+    if (isDirty) {
+      const file = files.find((entry) => entry.path === path);
+      const confirmed = await confirm(
+        `“${file?.name ?? "Arquivo"}” possui alterações recentes que ainda não foram confirmadas como salvas. Fechar a aba mesmo assim?`,
+        {
+          title: "Fechar arquivo",
+          kind: "warning",
+          okLabel: "Fechar mesmo assim",
+          cancelLabel: "Cancelar",
+        },
       );
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : String(loadError));
-    } finally {
-      setIsLoading(false);
+
+      if (!confirmed) return;
     }
-  };
+
+    setOpenTabPaths((current) => {
+      const index = current.indexOf(path);
+      const next = current.filter((item) => item !== path);
+
+      if (activeFilePath === path) {
+        const fallback = next[index] ?? next[index - 1] ?? next.at(-1) ?? null;
+        setActiveFilePath(fallback);
+        setSelectedEntryPath(fallback);
+      }
+
+      return next;
+    });
+  }
+
+  async function closeAllDirtyTabsAndLeave() {
+    if (dirtyPaths.size === 0) {
+      onBackToHome();
+      return;
+    }
+
+    const confirmed = await confirm(
+      `Existem ${dirtyPaths.size} arquivo(s) com alterações recentes. Voltar para a tela inicial mesmo assim?`,
+      {
+        title: "Alterações pendentes",
+        kind: "warning",
+        okLabel: "Voltar mesmo assim",
+        cancelLabel: "Continuar editando",
+      },
+    );
+
+    if (confirmed) {
+      onBackToHome();
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -228,20 +275,34 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         if (cancelled) return;
 
         setEntries(projectEntries);
-        setExpandedDirectories(collectDirectoryPaths(projectEntries));
-        setActiveFilePath((currentPath) => {
-          if (pendingActivePath && projectEntries.some((entry) => entry.path === pendingActivePath)) {
-            const nextPath = pendingActivePath;
-            setPendingActivePath(null);
-            return nextPath;
-          }
-
-          if (currentPath && projectEntries.some((entry) => entry.path === currentPath)) {
-            return currentPath;
-          }
-
-          return projectEntries.find((entry) => entry.kind === "file")?.path ?? null;
+        setExpandedDirectories((current) => {
+          const available = collectDirectoryPaths(projectEntries);
+          return new Set([...current].filter((path) => available.has(path)));
         });
+
+        const firstFile = projectEntries.find((entry) => entry.kind === "file");
+        const firstPath = pendingActivePath && projectEntries.some((entry) => entry.path === pendingActivePath)
+          ? pendingActivePath
+          : activeFilePath && projectEntries.some((entry) => entry.path === activeFilePath)
+            ? activeFilePath
+            : firstFile?.path ?? null;
+
+        if (pendingActivePath && projectEntries.some((entry) => entry.path === pendingActivePath)) {
+          setPendingActivePath(null);
+        }
+
+        setActiveFilePath(firstPath);
+        setSelectedEntryPath((currentPath) =>
+          currentPath && projectEntries.some((entry) => entry.path === currentPath)
+            ? currentPath
+            : firstPath,
+        );
+
+        if (openTabPaths.length === 0 && firstPath) {
+          setOpenTabPaths([firstPath]);
+        } else {
+          setOpenTabPaths((current) => current.filter((path) => projectEntries.some((entry) => entry.kind === "file" && entry.path === path)));
+        }
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -280,6 +341,16 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
             language: getLanguage(activeFile.name),
           },
         }));
+        setOriginalContents((current) => ({
+          ...current,
+          [activeFile.path]: content,
+        }));
+        setDirtyPaths((current) => {
+          if (!current.has(activeFile.path)) return current;
+          const next = new Set(current);
+          next.delete(activeFile.path);
+          return next;
+        });
       } catch (readError) {
         if (!cancelled) {
           setError(`Não foi possível abrir ${activeFile.name}: ${readError}`);
@@ -297,20 +368,39 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   useEffect(() => {
     if (!activeFile || !activeContent) return;
 
+    const original = originalContents[activeFile.path];
+    if (original !== undefined && original === activeContent.content) {
+      setDirtyPaths((current) => {
+        if (!current.has(activeFile.path)) return current;
+        const next = new Set(current);
+        next.delete(activeFile.path);
+        return next;
+      });
+      return;
+    }
+
+    markDirty(activeFile.path);
     setSaveState("saving");
 
     const timer = window.setTimeout(() => {
       void saveProjectFile(activeFile.path, activeContent.content)
-        .then(() => setSaveState("saved"))
-        .catch(() => setSaveState("error"));
+        .then(() => {
+          markSaved(activeFile.path, activeContent.content);
+          setSaveState("saved");
+        })
+        .catch(() => {
+          markDirty(activeFile.path);
+          setSaveState("error");
+        });
     }, 500);
 
     return () => window.clearTimeout(timer);
-  }, [activeFile, activeContent]);
+  }, [activeFile, activeContent, originalContents]);
 
   function updateActiveFile(value: string) {
     if (!activeFile) return;
 
+    markDirty(activeFile.path);
     setFileContents((current) => ({
       ...current,
       [activeFile.path]: {
@@ -381,42 +471,58 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   async function handleNameSubmit(name: string) {
     if (!nameDialog) return;
 
-    if (nameDialog.mode === "file") {
-      const newPath = await createProjectFile(nameDialog.parentPath, name);
-      setPendingActivePath(newPath);
-      setSelectedEntryPath(null);
-    } else if (nameDialog.mode === "folder") {
-      const newPath = await createProjectDirectory(nameDialog.parentPath, name);
-      const separator = newPath.includes("\\") ? "\\" : "/";
-      const parentPath = nameDialog.parentPath.replace(/[\\/]$/, "");
-      const relativeParent = parentPath === projectPath.replace(/[\\/]$/, "")
-        ? ""
-        : entries.find((entry) => entry.path === nameDialog.parentPath)?.relativePath ?? "";
-      const relativePath = relativeParent ? `${relativeParent}/${name}` : name;
-      setExpandedDirectories((current) => new Set(current).add(relativePath));
-      setSelectedEntryPath(newPath);
-      void separator;
-    } else if (nameDialog.target) {
-      const newPath = await renameProjectEntry(nameDialog.target.path, name);
+    try {
+      if (nameDialog.mode === "file") {
+        const newPath = await createProjectFile(nameDialog.parentPath, name);
+        setPendingActivePath(newPath);
+      } else if (nameDialog.mode === "folder") {
+        const newPath = await createProjectDirectory(nameDialog.parentPath, name);
+        const parentPath = nameDialog.parentPath.replace(/[\\/]$/, "");
+        const relativeParent = parentPath === projectPath.replace(/[\\/]$/, "")
+          ? ""
+          : entries.find((entry) => entry.path === nameDialog.parentPath)?.relativePath ?? "";
+        const relativePath = relativeParent ? `${relativeParent}/${name}` : name;
+        setExpandedDirectories((current) => new Set(current).add(relativePath));
+        setSelectedEntryPath(newPath);
+      } else if (nameDialog.target) {
+        const oldPath = nameDialog.target.path;
+        const newPath = await renameProjectEntry(oldPath, name);
 
-      if (nameDialog.target.kind === "file" && activeFilePath === nameDialog.target.path) {
-        setActiveFilePath(newPath);
+        setFileContents((current) => {
+          const previousContent = current[oldPath];
+          if (!previousContent) return current;
+          const next = { ...current };
+          delete next[oldPath];
+          next[newPath] = previousContent;
+          return next;
+        });
+
+        setOriginalContents((current) => {
+          if (!(oldPath in current)) return current;
+          const next = { ...current };
+          next[newPath] = next[oldPath];
+          delete next[oldPath];
+          return next;
+        });
+
+        setDirtyPaths((current) => {
+          if (!current.has(oldPath)) return current;
+          const next = new Set(current);
+          next.delete(oldPath);
+          next.add(newPath);
+          return next;
+        });
+
+        setOpenTabPaths((current) => current.map((path) => path === oldPath ? newPath : path));
+        setActiveFilePath((current) => current === oldPath ? newPath : current);
+        setSelectedEntryPath(newPath);
       }
 
-      setFileContents((current) => {
-        const previousContent = current[nameDialog.target!.path];
-        if (!previousContent) return current;
-        const next = { ...current };
-        delete next[nameDialog.target!.path];
-        next[newPath] = previousContent;
-        return next;
-      });
-
-      setSelectedEntryPath(newPath);
+      setNameDialog(null);
+      setRefreshKey((current) => current + 1);
+    } catch (mutationError) {
+      setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
     }
-
-    setNameDialog(null);
-    setRefreshKey((current) => current + 1);
   }
 
   async function handleDeleteSelected() {
@@ -437,23 +543,42 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     try {
       await deleteProjectEntry(selectedEntry);
       const deletedPath = selectedEntry.path;
+      const separator = deletedPath.includes("\\") ? "\\" : "/";
+      const affectsPath = (path: string) =>
+        path === deletedPath ||
+        (selectedEntry.kind === "directory" && path.startsWith(`${deletedPath}${separator}`));
 
-      if (activeFilePath === deletedPath || (selectedEntry.kind === "directory" && activeFilePath?.startsWith(`${deletedPath}${deletedPath.includes("\\") ? "\\" : "/"}`))) {
-        setActiveFilePath(null);
-      }
+      const deletedTabs = openTabPaths.filter(affectsPath);
+      const nextTabs = openTabPaths.filter((path) => !affectsPath(path));
 
+      setOpenTabPaths(nextTabs);
       setFileContents((current) => {
         const next = { ...current };
-        const separator = deletedPath.includes("\\") ? "\\" : "/";
         for (const path of Object.keys(next)) {
-          if (path === deletedPath || path.startsWith(`${deletedPath}${separator}`)) {
-            delete next[path];
-          }
+          if (affectsPath(path)) delete next[path];
         }
         return next;
       });
+      setOriginalContents((current) => {
+        const next = { ...current };
+        for (const path of Object.keys(next)) {
+          if (affectsPath(path)) delete next[path];
+        }
+        return next;
+      });
+      setDirtyPaths((current) => {
+        const next = new Set(current);
+        for (const path of deletedTabs) next.delete(path);
+        return next;
+      });
 
-      setSelectedEntryPath(null);
+      if (activeFilePath && affectsPath(activeFilePath)) {
+        const fallback = nextTabs[0] ?? null;
+        setActiveFilePath(fallback);
+        setSelectedEntryPath(fallback);
+      }
+
+      setSelectedEntryPath((current) => current === deletedPath ? null : current);
       setRefreshKey((current) => current + 1);
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
@@ -464,7 +589,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     <main className="workspace-shell">
       <header className="workspace-titlebar">
         <div className="workspace-brand">
-          <button className="workspace-back-button" type="button" onClick={onBackToHome}>
+          <button className="workspace-back-button" type="button" onClick={closeAllDirtyTabsAndLeave}>
             ‹
           </button>
           <span className="workspace-brand-name">Corant</span>
@@ -535,12 +660,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                       if (entry.kind === "directory") {
                         toggleDirectory(entry);
                       } else {
-                        setActiveFilePath(entry.path);
-                      }
-                    }}
-                    onDoubleClick={() => {
-                      if (entry.kind === "file") {
-                        setActiveFilePath(entry.path);
+                        openFile(entry);
                       }
                     }}
                     title={entry.relativePath}
@@ -551,6 +671,9 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                         : getFileIcon(entry.name)}
                     </span>
                     <span>{entry.name}</span>
+                    {entry.kind === "file" && dirtyPaths.has(entry.path) && (
+                      <span className="tree-dirty-dot" aria-label="Alterações pendentes">●</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -568,22 +691,42 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         <div className="workspace-sidebar-resizer" aria-hidden="true" />
 
         <section className="workspace-editor-area">
-          <div className="editor-tabs">
-            {files.map((file) => (
-              <button
-                key={file.path}
-                className={`editor-tab ${file.path === activeFilePath ? "is-active" : ""}`}
-                type="button"
-                onClick={() => {
-                  setSelectedEntryPath(file.path);
-                  setActiveFilePath(file.path);
-                }}
-              >
-                <span className="file-icon">{getFileIcon(file.name)}</span>
-                <span>{file.name}</span>
-                {file.path === activeFilePath && <span className="tab-dot" />}
-              </button>
-            ))}
+          <div className="editor-tabs" role="tablist" aria-label="Arquivos abertos">
+            {openTabs.map((file) => {
+              const isActive = file.path === activeFilePath;
+              const isDirty = dirtyPaths.has(file.path);
+
+              return (
+                <div
+                  className={`editor-tab ${isActive ? "is-active" : ""} ${isDirty ? "is-dirty" : ""}`}
+                  key={file.path}
+                >
+                  <button
+                    className="editor-tab-main"
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    onClick={() => openFile(file)}
+                    title={file.relativePath}
+                  >
+                    <span className="file-icon">{getFileIcon(file.name)}</span>
+                    <span className="editor-tab-name">{file.name}</span>
+                    {isDirty && <span className="tab-dot" aria-label="Alterações pendentes" />}
+                  </button>
+                  <button
+                    className="editor-tab-close"
+                    type="button"
+                    aria-label={`Fechar ${file.name}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void closeTab(file.path);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           {activeFile && activeContent ? (
@@ -612,7 +755,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                 <div className="status-left">
                   <span>Local</span>
                   <span>✓</span>
-                  <span>0 erros</span>
+                  <span>{dirtyPaths.has(activeFile.path) ? "Alterações pendentes" : "0 erros"}</span>
                 </div>
                 <div className="status-right">
                   <span>Spaces: 2</span>
@@ -625,7 +768,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
             <div className="editor-empty-state">
               <strong>{error ? "Não foi possível carregar o arquivo" : "Nenhum arquivo aberto"}</strong>
               <span>
-                {error ?? "Crie ou coloque um arquivo dentro desta pasta para começar a editar."}
+                {error ?? "Abra um arquivo pelo Explorer para começar a editar."}
               </span>
             </div>
           )}
