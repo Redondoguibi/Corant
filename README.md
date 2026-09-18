@@ -79,7 +79,7 @@ Inclui:
 
 > Recursos como `Ctrl + Tab`, `Ctrl + W`, menu de contexto e grupos/divisão de editores continuam planejados para etapas posteriores.
 
-### 🚧 Parte 3 — Autosave + recuperação
+### ✅ Parte 3 — Autosave + recuperação
 
 A primeira implementação de autosave foi evoluída para uma camada inicial de recuperação local.
 
@@ -92,7 +92,7 @@ Inclui atualmente:
 - recuperação de conteúdo após encerramento inesperado/crash;
 - comparação entre snapshot recuperável e arquivo salvo no disco;
 - confirmação antes de restaurar uma versão recuperável;
-- limpeza do snapshot após salvamento bem-sucedido ou descarte;
+- limpeza do snapshot após salvamento bem-sucedido ou rejeição da recuperação;
 - integração com indicadores de alterações das abas;
 - recuperação mantida localmente, sem backend.
 
