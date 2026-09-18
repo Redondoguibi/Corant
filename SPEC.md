@@ -236,9 +236,9 @@ The image editor is not yet part of the current implementation represented by th
 
 ## 7. Tabs — Part 2
 
-**Status: next implementation stage.**
+**Status: implemented in the current repository.**
 
-The current editor supports an active file but does not yet provide the complete intended multi-tab system.
+The current editor provides the initial intended multi-tab system. Some convenience features remain planned for later.
 
 The tabs system should provide:
 
@@ -283,7 +283,9 @@ Existing state that should be considered when implementing tabs includes:
 
 ## 8. Autosave + recovery — Part 3
 
-A first autosave implementation already exists.
+**Status: implemented in the current repository as the initial local recovery layer.**
+
+The first autosave implementation has been extended with local recovery snapshots.
 
 Current initial behavior:
 
@@ -291,9 +293,9 @@ Current initial behavior:
 - then writes the file through the filesystem service
 - UI exposes a saving/saved/error state
 
-This is intentionally only a first implementation.
+The current implementation is the first recovery layer; further hardening can be added later.
 
-### Required robust system
+### Current implementation
 
 The final persistence system should provide:
 
@@ -306,9 +308,7 @@ The final persistence system should provide:
 - recovery cleanup once the user accepts/rejects a recovery state
 - integration with tabs and dirty markers
 
-A likely design direction is a small local recovery/journal mechanism tied to the project and file paths, but the concrete format and location should be designed before implementation.
-
-The system should remain local-first and should not require a Corant backend.
+The recovery store is implemented in `src/services/recoveryStore.ts` and integrated into `src/components/editor/Workspace.tsx`. It remains local-first and does not require a Corant backend.
 
 ---
 
@@ -934,7 +934,7 @@ This is the agreed initial implementation order.
 
 ### Part 2 — Tabs
 
-**Status: next.**
+**Status: implemented in the current repository.**
 
 - multiple open files
 - closing tabs
@@ -945,7 +945,7 @@ This is the agreed initial implementation order.
 
 ### Part 3 — Autosave + recovery
 
-**Status: planned.**
+**Status: implemented in the current repository as the initial recovery layer.**
 
 - robust autosave
 - crash recovery
@@ -955,7 +955,7 @@ This is the agreed initial implementation order.
 
 ### Part 4 — Global search
 
-**Status: planned.**
+**Status: next implementation stage.**
 
 - filename search first
 - project-wide content search second
@@ -1125,10 +1125,10 @@ This list is a working map rather than a guarantee that no other files matter.
 | Monaco editor | Current |
 | Basic language detection | Current |
 | Initial autosave | Current |
-| Robust recovery | Planned |
-| Multi-tab editor | Next |
-| Dirty-tab protection | Next |
-| Global filename search | Planned |
+| Robust recovery | Initial implementation current; further improvements planned |
+| Multi-tab editor | Current |
+| Dirty-tab protection | Current |
+| Global filename search | Next |
 | Project content search | Planned |
 | Functional menus | Planned |
 | Integrated terminal | Planned |
