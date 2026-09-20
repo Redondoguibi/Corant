@@ -12,12 +12,6 @@ export function App() {
 
   useEffect(() => {
     function suppressWebViewContextMenu(event: MouseEvent) {
-      const target = event.target instanceof Element ? event.target : null;
-
-      if (target?.closest(".monaco-editor")) {
-        return;
-      }
-
       event.preventDefault();
     }
 
