@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { MonacoEditor } from "./monaco/MonacoEditor";
 import { ExplorerNameDialog } from "./ExplorerNameDialog";
+import { GlobalSearchPanel } from "./GlobalSearchPanel";
 import {
   createProjectDirectory,
   createProjectFile,
@@ -35,6 +36,12 @@ type NameDialogState = {
   initialName?: string;
   target?: ProjectFile;
 } | null;
+
+type EditorSearchLocation = {
+  path: string;
+  lineNumber: number;
+  column: number;
+};
 
 function getLanguage(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
@@ -158,6 +165,8 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   const [refreshKey, setRefreshKey] = useState(0);
   const [pendingActivePath, setPendingActivePath] = useState<string | null>(null);
   const [nameDialog, setNameDialog] = useState<NameDialogState>(null);
+  const [sidebarMode, setSidebarMode] = useState<"explorer" | "search">("explorer");
+  const [editorLocation, setEditorLocation] = useState<EditorSearchLocation | null>(null);
   const sidebarWidth = 248;
 
   const files = useMemo(
@@ -206,12 +215,54 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     });
   }
 
-  function openFile(file: ProjectFile) {
+  function activateFile(
+    file: ProjectFile,
+    location?: { lineNumber: number; column: number },
+  ) {
     setSelectedEntryPath(file.path);
     setActiveFilePath(file.path);
     setOpenTabPaths((current) =>
       current.includes(file.path) ? current : [...current, file.path],
     );
+    setEditorLocation(
+      location
+        ? {
+            path: file.path,
+            lineNumber: location.lineNumber,
+            column: location.column,
+          }
+        : null,
+    );
+  }
+
+  function openFile(file: ProjectFile) {
+    activateFile(file);
+  }
+
+  function openSearchEntry(entry: ProjectFile) {
+    if (entry.kind === "file") {
+      activateFile(entry);
+      return;
+    }
+
+    setSelectedEntryPath(entry.path);
+    setExpandedDirectories((current) => {
+      const next = new Set(current);
+      const parts = entry.relativePath.split("/");
+      let currentPath = "";
+
+      for (const part of parts) {
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+        next.add(currentPath);
+      }
+
+      return next;
+    });
+    setSidebarMode("explorer");
+  }
+
+  function openSearchMatch(file: ProjectFile, lineNumber: number, column: number) {
+    activateFile(file, { lineNumber, column });
   }
 
   async function closeTab(path: string) {
@@ -548,6 +599,9 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
         setOpenTabPaths((current) => current.map((path) => path === oldPath ? newPath : path));
         setActiveFilePath((current) => current === oldPath ? newPath : current);
+        setEditorLocation((current) =>
+          current?.path === oldPath ? { ...current, path: newPath } : current,
+        );
         setSelectedEntryPath(newPath);
       }
 
@@ -615,6 +669,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         setSelectedEntryPath(fallback);
       }
 
+      setEditorLocation((current) => current && affectsPath(current.path) ? null : current);
       setSelectedEntryPath((current) => current === deletedPath ? null : current);
       setRefreshKey((current) => current + 1);
     } catch (deleteError) {
@@ -657,72 +712,107 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
       <section className="workspace-body">
         <aside className="workspace-sidebar" style={{ width: sidebarWidth }}>
-          <div className="sidebar-heading">
-            <span>EXPLORADOR</span>
-            <div className="sidebar-heading-actions">
-              <button type="button" aria-label="Novo arquivo" onClick={() => openNameDialog("file")}>＋</button>
-              <button type="button" aria-label="Nova pasta" onClick={() => openNameDialog("folder")}>▱</button>
-              <button type="button" aria-label="Atualizar projeto" onClick={() => setRefreshKey((current) => current + 1)}>↻</button>
-              <button type="button" aria-label="Mais ações" onClick={openRenameDialog} disabled={!selectedEntry}>•••</button>
-            </div>
-          </div>
-
-          <div className="project-tree">
-            <button
-              className={`tree-project-name ${selectedEntryPath === null ? "is-root-selected" : ""}`}
-              type="button"
-              onClick={() => setSelectedEntryPath(null)}
-              title="Selecionar a raiz do projeto"
-            >
-              <span className="tree-chevron">⌄</span>
-              <span>{projectName}</span>
-            </button>
-
-            {isLoading && <div className="tree-message">Carregando arquivos...</div>}
-
-            {!isLoading && !error && entries.length === 0 && (
-              <div className="tree-message">Pasta vazia</div>
-            )}
-
-            {!isLoading && !error && entries.length > 0 && (
-              <div className="tree-files">
-                {entries.filter(isEntryVisible).map((entry) => (
+          {sidebarMode === "explorer" ? (
+            <>
+              <div className="sidebar-heading">
+                <span>EXPLORADOR</span>
+                <div className="sidebar-heading-actions">
                   <button
-                    key={entry.path}
-                    className={`tree-file ${entry.path === activeFilePath ? "is-active" : ""} ${entry.path === selectedEntryPath ? "is-selected" : ""}`}
                     type="button"
-                    style={getEntryPadding(entry)}
-                    onClick={() => {
-                      setSelectedEntryPath(entry.path);
-                      if (entry.kind === "directory") {
-                        toggleDirectory(entry);
-                      } else {
-                        openFile(entry);
-                      }
-                    }}
-                    title={entry.relativePath}
+                    aria-label="Busca global"
+                    title="Busca global"
+                    onClick={() => setSidebarMode("search")}
                   >
-                    <span className="file-icon">
-                      {entry.kind === "directory"
-                        ? expandedDirectories.has(entry.relativePath) ? "▾" : "›"
-                        : getFileIcon(entry.name)}
-                    </span>
-                    <span>{entry.name}</span>
-                    {entry.kind === "file" && dirtyPaths.has(entry.path) && (
-                      <span className="tree-dirty-dot" aria-label="Alterações pendentes">●</span>
-                    )}
+                    ⌕
                   </button>
-                ))}
+                  <button type="button" aria-label="Novo arquivo" onClick={() => openNameDialog("file")}>＋</button>
+                  <button type="button" aria-label="Nova pasta" onClick={() => openNameDialog("folder")}>▱</button>
+                  <button type="button" aria-label="Atualizar projeto" onClick={() => setRefreshKey((current) => current + 1)}>↻</button>
+                  <button type="button" aria-label="Mais ações" onClick={openRenameDialog} disabled={!selectedEntry}>•••</button>
+                </div>
               </div>
-            )}
 
-            {error && <div className="tree-error">{error}</div>}
-          </div>
+              <div className="project-tree">
+                <button
+                  className={`tree-project-name ${selectedEntryPath === null ? "is-root-selected" : ""}`}
+                  type="button"
+                  onClick={() => setSelectedEntryPath(null)}
+                  title="Selecionar a raiz do projeto"
+                >
+                  <span className="tree-chevron">⌄</span>
+                  <span>{projectName}</span>
+                </button>
 
-          <div className="sidebar-footer">
-            <span>{files.length} arquivos</span>
-            <span>Local</span>
-          </div>
+                {isLoading && <div className="tree-message">Carregando arquivos...</div>}
+
+                {!isLoading && !error && entries.length === 0 && (
+                  <div className="tree-message">Pasta vazia</div>
+                )}
+
+                {!isLoading && !error && entries.length > 0 && (
+                  <div className="tree-files">
+                    {entries.filter(isEntryVisible).map((entry) => (
+                      <button
+                        key={entry.path}
+                        className={`tree-file ${entry.path === activeFilePath ? "is-active" : ""} ${entry.path === selectedEntryPath ? "is-selected" : ""}`}
+                        type="button"
+                        style={getEntryPadding(entry)}
+                        onClick={() => {
+                          setSelectedEntryPath(entry.path);
+                          if (entry.kind === "directory") {
+                            toggleDirectory(entry);
+                          } else {
+                            openFile(entry);
+                          }
+                        }}
+                        title={entry.relativePath}
+                      >
+                        <span className="file-icon">
+                          {entry.kind === "directory"
+                            ? expandedDirectories.has(entry.relativePath) ? "▾" : "›"
+                            : getFileIcon(entry.name)}
+                        </span>
+                        <span>{entry.name}</span>
+                        {entry.kind === "file" && dirtyPaths.has(entry.path) && (
+                          <span className="tree-dirty-dot" aria-label="Alterações pendentes">●</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {error && <div className="tree-error">{error}</div>}
+              </div>
+
+              <div className="sidebar-footer">
+                <span>{files.length} arquivos</span>
+                <span>Local</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="sidebar-heading">
+                <span>BUSCA</span>
+                <div className="sidebar-heading-actions">
+                  <button
+                    type="button"
+                    aria-label="Voltar ao Explorer"
+                    title="Voltar ao Explorer"
+                    onClick={() => setSidebarMode("explorer")}
+                  >
+                    ‹
+                  </button>
+                </div>
+              </div>
+
+              <GlobalSearchPanel
+                entries={entries}
+                contentOverrides={fileContents}
+                onOpenEntry={openSearchEntry}
+                onOpenMatch={openSearchMatch}
+              />
+            </>
+          )}
         </aside>
 
         <div className="workspace-sidebar-resizer" aria-hidden="true" />
@@ -785,6 +875,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                   value={activeContent.content}
                   language={activeContent.language}
                   onChange={updateActiveFile}
+                  targetLocation={editorLocation?.path === activeFile.path ? editorLocation : undefined}
                 />
               </div>
 
