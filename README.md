@@ -51,6 +51,7 @@ Inclui:
 - expandir/recolher pastas;
 - selecionar arquivos e pastas;
 - atualizar a árvore do projeto;
+- menu de contexto próprio no Explorer com ações para arquivos, pastas e raiz do projeto;
 - abrir arquivos de texto reais;
 - detecção básica de linguagem por extensão;
 - integração com o autosave.
@@ -75,9 +76,10 @@ Inclui:
 - confirmação antes de fechar uma aba com alterações pendentes;
 - atualização das abas ao renomear arquivos;
 - remoção segura das abas quando arquivos/pastas abertos são excluídos;
+- menu de contexto nas abas com Fechar, Fechar Outras, Fechar à Direita e Fechar Todas;
 - integração com o autosave e recuperação.
 
-> Recursos como `Ctrl + Tab`, `Ctrl + W`, menu de contexto e grupos/divisão de editores continuam planejados para etapas posteriores.
+> Recursos como `Ctrl + Tab`, `Ctrl + W` e grupos/divisão de editores continuam planejados para etapas posteriores.
 
 ### ✅ Parte 3 — Autosave + recuperação
 
@@ -186,6 +188,18 @@ O produto completo também prevê:
 - projetos recentes e favoritos;
 - busca rápida por nome de arquivo;
 - integração Git via plugin da comunidade, em vez de depender de Git como funcionalidade nativa obrigatória.
+
+## Menus de contexto
+
+O menu de contexto padrão do WebView foi desativado. O Corant agora utiliza menus próprios nas áreas em que existem ações da aplicação, com comportamento visual próximo ao de um editor desktop.
+
+Atualmente:
+
+- Explorer: ações de criação, abertura, renomeação, exclusão e atualização conforme o alvo clicado;
+- abas: fechar a aba, fechar outras, fechar à direita e fechar todas;
+- cliques fora do menu, `Esc`, redimensionamento e perda de foco fecham o menu;
+- o menu se reposiciona para permanecer dentro da janela;
+- o Monaco mantém seu próprio menu de contexto de editor.
 
 ## Editor
 
