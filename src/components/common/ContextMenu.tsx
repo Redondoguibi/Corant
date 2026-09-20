@@ -6,7 +6,7 @@ export type ContextMenuItem = {
   disabled?: boolean;
   danger?: boolean;
   separatorBefore?: boolean;
-  onSelect: () => void | Promise<void>;
+  onSelect: () => void | Promise<unknown>;
 };
 
 type ContextMenuProps = {
