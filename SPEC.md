@@ -782,7 +782,7 @@ The current Tauri bundle targets all configured target types and references gene
 
 ## 26. Filesystem security model
 
-The native layer currently uses Tauri's filesystem scope mechanisms.
+The native layer currently uses Tauri's filesystem scope mechanisms together with explicit filesystem command permissions.
 
 The native code includes commands to:
 
@@ -791,6 +791,8 @@ The native code includes commands to:
 - add the project directory to the allowed filesystem scope
 - create a new project directory
 - add the newly created project to the filesystem scope
+
+The desktop capability also explicitly enables the filesystem commands currently used by the Explorer: directory listing, text-file reading/writing, directory creation, rename, and removal. The runtime project scope still limits those operations to project directories that Corant has explicitly allowed.
 
 Current relevant native functions include:
 
