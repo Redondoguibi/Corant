@@ -96,6 +96,22 @@ The project name should remain visible enough that users always know which proje
 
 ---
 
+## 4.1 Context-menu behavior
+
+The browser/WebView default context menu is suppressed across the Corant application so web-browser actions are not exposed as part of the desktop UX.
+
+Current behavior:
+
+- Explorer items use a Corant-owned context menu with actions appropriate to the project root, folders, and files
+- editor tabs use a Corant-owned context menu for tab-closing operations
+- the reusable menu supports viewport-aware positioning, outside-click dismissal, `Esc`, and keyboard up/down navigation
+- Monaco keeps its own editor context menu enabled because it is part of the code-editor experience and already aligns with the desktop-editor interaction model
+- areas without a Corant context menu do not fall back to the WebView/browser menu
+
+This is a core UI behavior and does not mean Part 5 functional top menus are complete.
+
+---
+
 ## 5. Explorer
 
 ## 5.1 Goal
@@ -118,6 +134,7 @@ Current functionality includes:
 - collapse folders
 - select files/folders
 - refresh/reload the project tree
+- custom Explorer context menu for project root, folders, and files
 - open real text files
 - display the project tree recursively
 - basic file-language detection based on extension
@@ -256,12 +273,12 @@ The tabs system should provide:
 - deleting an open file must update/remove its tab safely
 - closing the active tab should select a sensible neighboring tab
 - tab state must integrate with autosave/recovery
+- tabs have a custom context menu with close, close others, close to the right, and close all actions
 
 Planned future tab features may include:
 
 - `Ctrl + Tab`
 - `Ctrl + W`
-- context menu on tabs
 - visual unsaved marker such as `●`
 - split editor / editor groups
 
