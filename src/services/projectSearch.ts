@@ -177,6 +177,19 @@ export async function searchProjectContents(
       const line = lines[lineIndex];
       const matchIndex = line.toLocaleLowerCase().indexOf(normalizedQuery);
 
+      if ((lineIndex + 1) % YIELD_EVERY_LINES === 0) {
+        if (isCancelled()) {
+          return {
+            matches,
+            searchedFiles,
+            skippedFiles,
+            truncated,
+          };
+        }
+
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+
       if (matchIndex < 0) {
         continue;
       }
@@ -202,19 +215,6 @@ export async function searchProjectContents(
       if (matchesInFile >= MAX_RESULTS_PER_FILE) {
         truncated = true;
         break;
-      }
-
-      if ((lineIndex + 1) % YIELD_EVERY_LINES === 0) {
-        if (isCancelled()) {
-          return {
-            matches,
-            searchedFiles,
-            skippedFiles,
-            truncated,
-          };
-        }
-
-        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
     }
 
