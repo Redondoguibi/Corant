@@ -329,31 +329,58 @@ The final UX should never make it easy to accidentally lose user work.
 
 ## 10. Global search — Part 4
 
-The search roadmap is intentionally split into two levels.
+**Status: implemented in the current repository.**
 
-### Phase A — filename search
+The initial global-search system is implemented in two integrated layers inside the workspace sidebar.
 
-Search by file/folder name across the project.
+### Phase A — filename/folder search
 
-The system should allow fast discovery without requiring the user to manually expand folders.
+Current behavior:
+
+- searches file and folder names across the loaded project tree
+- also matches relative paths
+- does not require the user to manually expand folders first
+- file results open through the existing tab system
+- folder results return to the Explorer and expand the relevant path
 
 ### Phase B — content search
 
-Search inside file contents across the project.
+Current behavior:
 
-Planned behavior:
+- searches relevant text files across the project
+- uses the in-memory content for files already loaded in the editor, so recent edits can participate in search
+- groups results by file
+- shows the matching line and contextual line text
+- clicking a result opens/reuses the corresponding tab
+- Monaco moves to the matching line and column
+- searches are debounced and older runs use cooperative cancellation so stale searches do not replace newer results
+- the search loop periodically yields back to the browser event loop to reduce UI blocking
 
-- search all relevant project files
-- show matching files
-- show matching lines/context
-- open the corresponding file from a result
-- integrate with tabs
+### Initial search guardrails
 
-The exact search indexing/implementation strategy has not yet been finalized.
+To keep the first implementation practical on larger projects:
+
+- common dependency/generated directories are excluded from content search: `.git`, `node_modules`, `target`, `dist`, `build`, `.next`, and `coverage`
+- common binary extensions are excluded from text search
+- filename/path results are limited to 120
+- content results are limited to 500 total matching lines
+- each file contributes at most 100 matching lines to one search
+
+These are implementation guardrails, not a requirement that the exclusions remain permanently hard-coded. A later settings/search-options pass can make them configurable if needed.
+
+### Relevant implementation
+
+- `src/components/editor/GlobalSearchPanel.tsx` — search UI, result grouping, debounce and cancellation
+- `src/services/projectSearch.ts` — filename/path filtering and project-wide content search
+- `src/components/editor/Workspace.tsx` — sidebar integration and tab navigation
+- `src/components/editor/monaco/MonacoEditor.tsx` — reveal/focus behavior for a selected search result
+- `src/styles/search.css` — search-panel visual styling
 
 ---
 
 ## 11. Menus — Part 5
+
+**Status: next implementation stage.**
 
 The current top menubar is visual and contains items such as:
 
@@ -606,9 +633,9 @@ This should remain local-first and should not require a Corant account.
 
 ## 21. Quick file-name search
 
-In addition to the broader global-search roadmap, the workspace should provide quick file-name discovery so users can jump to a file without manually navigating the complete tree.
+The global-search infrastructure implemented in Part 4 now provides quick file/folder-name discovery without requiring manual tree expansion.
 
-This may eventually share infrastructure with the global search system.
+This initial implementation shares the same workspace sidebar search UI and project-entry data as content search. A separate quick-open interaction or dedicated shortcut can still be added later without duplicating the underlying search logic.
 
 ---
 
@@ -955,14 +982,17 @@ This is the agreed initial implementation order.
 
 ### Part 4 — Global search
 
-**Status: next implementation stage.**
+**Status: implemented in the current repository.**
 
-- filename search first
-- project-wide content search second
+- filename/folder and relative-path search
+- project-wide text-content search
+- results grouped by file and line
+- tab integration and Monaco line navigation
+- initial performance exclusions/limits for generated and binary content
 
 ### Part 5 — Functional menus
 
-**Status: planned.**
+**Status: next implementation stage.**
 
 - File/Edit/Selection/View/Run/Terminal/Help menus become operational
 
@@ -1128,9 +1158,9 @@ This list is a working map rather than a guarantee that no other files matter.
 | Robust recovery | Initial implementation current; further improvements planned |
 | Multi-tab editor | Current |
 | Dirty-tab protection | Current |
-| Global filename search | Next |
-| Project content search | Planned |
-| Functional menus | Planned |
+| Global filename search | Current |
+| Project content search | Current |
+| Functional menus | Next |
 | Integrated terminal | Planned |
 | Image editor | Planned |
 | Import/export archives | Planned |
