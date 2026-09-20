@@ -108,7 +108,7 @@ Current behavior:
 - Monaco keeps its own editor context menu enabled because it is part of the code-editor experience and already aligns with the desktop-editor interaction model
 - areas without a Corant context menu do not fall back to the WebView/browser menu
 
-This is a core UI behavior and does not mean Part 5 functional top menus are complete.
+The Part 5 top menus now complement these context menus with workspace and editor commands.
 
 ---
 
@@ -275,11 +275,10 @@ The tabs system should provide:
 - tab state must integrate with autosave/recovery
 - tabs have a custom context menu with close, close others, close to the right, and close all actions
 
+Part 5 adds `Ctrl + Tab` / `Ctrl + Shift + Tab` navigation and `Ctrl + W` closing, with existing dirty-tab protection. Monaco models now preserve separate undo histories per file during the project session.
+
 Planned future tab features may include:
 
-- `Ctrl + Tab`
-- `Ctrl + W`
-- visual unsaved marker such as `●`
 - split editor / editor groups
 
 These future features are not required for the initial tab implementation.
@@ -397,9 +396,9 @@ These are implementation guardrails, not a requirement that the exclusions remai
 
 ## 11. Menus — Part 5
 
-**Status: next implementation stage.**
+**Status: implemented in the current repository.**
 
-The current top menubar is visual and contains items such as:
+The top menubar uses dropdown menus with keyboard navigation, visible shortcuts, contextual disabled states, checkable view settings, and outside-click/Escape dismissal:
 
 - Arquivo
 - Editar
@@ -409,13 +408,7 @@ The current top menubar is visual and contains items such as:
 - Terminal
 - Ajuda
 
-These currently need to become functional menus.
-
-### Intended approach
-
-Menus should use dropdown menus rather than a command-palette-only interaction model.
-
-The planned menus should expose real application actions such as:
+### Current actions
 
 **Arquivo**
 - new file
@@ -437,25 +430,28 @@ The planned menus should expose real application actions such as:
 - select all
 
 **Seleção**
-- selection-related editor actions
+- select all, select line, expand/shrink selection, next/all matching occurrences
 
 **Exibir**
-- workspace visibility/navigation actions
-- future panel toggles
+- show Explorer/global search, toggle sidebar/minimap/word wrap
+- previous/next tab and refresh Explorer
 
 **Executar**
-- run-related actions where supported
+- disabled unavailable indication until execution is supported
 
 **Terminal**
-- open/focus terminal
-- future terminal commands/actions
+- disabled unavailable indication; integrated terminal remains Part 6
 
 **Ajuda**
-- about
-- documentation/help
-- support-related links/actions as appropriate
+- local usage/shortcut guide and about/version dialog
 
-The exact menu contents should evolve with implemented capabilities instead of exposing dead actions.
+Edit also includes Monaco find/replace. Clipboard commands operate on the active editor and report access failures in the workspace.
+
+Manual saves and autosave share a per-file write queue. Save all includes modified loaded files even when their tabs are inactive/closed, and waits for queued writes. Recovery snapshots are only cleared when the completed write matches current content. Switching/closing projects and exiting the window offer save-and-continue or cancel for pending changes; failed saves keep the workspace open. The native close event uses the same guard as File > Exit.
+
+Implemented shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+B, Alt+Z and F1. Editor-native shortcuts continue to use Monaco. User-customizable bindings remain planned.
+
+Implementation: `WorkspaceMenuBar.tsx`, `WorkspaceHelpDialog.tsx`, `Workspace.tsx`, `MonacoEditor.tsx`, `editorCommands.ts`, and `fileSaveQueue.ts`. Playwright tests in `tests/` exercise the real React/Monaco UI with mocked native IPC, plus write ordering/failure recovery. Native dialogs/filesystem/window behavior still require desktop smoke testing.
 
 ---
 
@@ -1011,9 +1007,10 @@ This is the agreed initial implementation order.
 
 ### Part 5 — Functional menus
 
-**Status: next implementation stage.**
+**Status: implemented in the current repository.**
 
-- File/Edit/Selection/View/Run/Terminal/Help menus become operational
+- dropdown File/Edit/Selection/View/Help menus, shortcuts and safe save/leave actions
+- Run/Terminal display unavailable states pending Part 6
 
 ### Part 6 — Integrated terminal
 
@@ -1179,7 +1176,7 @@ This list is a working map rather than a guarantee that no other files matter.
 | Dirty-tab protection | Current |
 | Global filename search | Current |
 | Project content search | Current |
-| Functional menus | Next |
+| Functional menus | Current; Run/Terminal actions pending Part 6 |
 | Integrated terminal | Planned |
 | Image editor | Planned |
 | Import/export archives | Planned |

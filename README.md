@@ -79,7 +79,7 @@ Inclui:
 - menu de contexto nas abas com Fechar, Fechar Outras, Fechar à Direita e Fechar Todas;
 - integração com o autosave e recuperação.
 
-> Recursos como `Ctrl + Tab`, `Ctrl + W` e grupos/divisão de editores continuam planejados para etapas posteriores.
+> Os atalhos `Ctrl + Tab` e `Ctrl + W` estão disponíveis desde a Parte 5. Grupos/divisão de editores continuam planejados.
 
 ### ✅ Parte 3 — Autosave + recuperação
 
@@ -122,19 +122,24 @@ Inclui atualmente:
 
 A interface está em [`GlobalSearchPanel.tsx`](src/components/editor/GlobalSearchPanel.tsx), a lógica de busca está em [`projectSearch.ts`](src/services/projectSearch.ts) e a navegação para resultados é integrada ao [`Workspace.tsx`](src/components/editor/Workspace.tsx) e ao [`MonacoEditor.tsx`](src/components/editor/monaco/MonacoEditor.tsx).
 
-### ⏳ Parte 5 — Menus funcionais
+### ✅ Parte 5 — Menus funcionais
 
-Os menus do workspace deverão deixar de ser apenas visuais e começarão a executar ações reais.
+O workspace agora possui menus suspensos com navegação por teclado, atalhos visíveis, fechamento com `Esc`/clique externo e ações habilitadas conforme o contexto.
 
-Menus previstos:
+Inclui:
 
-- `Arquivo`
-- `Editar`
-- `Seleção`
-- `Exibir`
-- `Executar`
-- `Terminal`
-- `Ajuda`
+- `Arquivo`: criar arquivo/pasta, abrir projeto, salvar, salvar tudo, fechar abas/projeto e sair;
+- `Editar`: desfazer/refazer, recortar/copiar/colar, excluir, selecionar tudo, localizar e substituir no Monaco;
+- `Seleção`: selecionar linha, expandir/reduzir seleção e selecionar ocorrências;
+- `Exibir`: Explorer, busca global, barra lateral, minimapa, quebra de linha, navegação entre abas e atualização do Explorer;
+- `Ajuda`: guia local de uso/atalhos e informações da versão;
+- `Executar` e `Terminal`: menus com indicações desabilitadas de indisponibilidade; a execução e o terminal integrado continuam reservados à Parte 6.
+
+Salvar tudo inclui arquivos carregados com alterações, mesmo em abas inativas. As gravações são serializadas por arquivo para evitar conflitos entre autosave e salvamento manual. Abrir/fechar projeto e sair (inclusive pelo botão da janela) oferecem salvar alterações pendentes ou cancelar; uma falha de salvamento mantém o workspace aberto. Cada arquivo mantém seu próprio histórico de desfazer durante a sessão do projeto.
+
+Atalhos principais: `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab`/`Ctrl+Shift+Tab`, `Ctrl+Shift+E`, `Ctrl+Shift+F`, `Ctrl+B`, `Alt+Z` e `F1`.
+
+A interface dos menus está em [`WorkspaceMenuBar.tsx`](src/components/editor/WorkspaceMenuBar.tsx), integrada ao [`Workspace.tsx`](src/components/editor/Workspace.tsx).
 
 ### ⏳ Parte 6 — Terminal integrado
 
@@ -306,6 +311,14 @@ Build do frontend:
 ```powershell
 npm run build
 ```
+
+Testes automatizados dos menus e da fila de salvamento:
+
+```powershell
+npm test
+```
+
+Os testes usam Playwright com Microsoft Edge instalado. Para usar outro navegador compatível, defina `PLAYWRIGHT_CHANNEL` (por exemplo, `chrome`). Os testes de interface executam o Monaco real com os assets instalados e simulam as chamadas nativas do Tauri; não substituem uma verificação manual no aplicativo desktop.
 
 ## Configuração Tauri
 

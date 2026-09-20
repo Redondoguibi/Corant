@@ -57,9 +57,11 @@ export function App() {
     return (
       <div className="corant-app">
         <Workspace
+          key={project.path}
           projectName={project.name}
           projectPath={project.path}
           onBackToHome={() => setProject(null)}
+          onOpenProject={handleOpenProject}
         />
       </div>
     );

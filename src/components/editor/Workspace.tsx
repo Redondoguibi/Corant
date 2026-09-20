@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
+import type { editor } from "monaco-editor";
+import { isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { MonacoEditor } from "./monaco/MonacoEditor";
 import { ExplorerNameDialog } from "./ExplorerNameDialog";
 import { GlobalSearchPanel } from "./GlobalSearchPanel";
+import { WorkspaceMenuBar, type WorkspaceMenu, type WorkspaceMenuItem } from "./WorkspaceMenuBar";
+import { WorkspaceHelpDialog } from "./WorkspaceHelpDialog";
+import { createFileSaveQueue } from "../../services/fileSaveQueue";
+import { runEditorCommand } from "../../services/editorCommands";
+import "../../styles/menus.css";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import {
   createProjectDirectory,
@@ -25,6 +33,7 @@ type WorkspaceProps = {
   projectName: string;
   projectPath: string;
   onBackToHome: () => void;
+  onOpenProject: () => Promise<void>;
 };
 
 type FileContent = {
@@ -167,7 +176,7 @@ function collectDirectoryPaths(entries: ProjectFile[]) {
   );
 }
 
-export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceProps) {
+export function Workspace({ projectName, projectPath, onBackToHome, onOpenProject }: WorkspaceProps) {
   const [entries, setEntries] = useState<ProjectFile[]>([]);
   const [openTabPaths, setOpenTabPaths] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -185,6 +194,37 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   const [sidebarMode, setSidebarMode] = useState<"explorer" | "search">("explorer");
   const [editorLocation, setEditorLocation] = useState<EditorSearchLocation | null>(null);
   const [contextMenu, setContextMenu] = useState<WorkspaceContextMenuState>(null);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [wordWrap, setWordWrap] = useState(false);
+  const [minimap, setMinimap] = useState(true);
+  const [helpPage, setHelpPage] = useState<"about" | "help" | null>(null);
+  const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
+  const [isLeaving, setIsLeaving] = useState(false);
+  const leavingRef = useRef(false);
+  const contentsRef = useRef(fileContents);
+  const originalsRef = useRef(originalContents);
+  contentsRef.current = fileContents;
+  originalsRef.current = originalContents;
+  const saveQueue = useRef(createFileSaveQueue(saveProjectFile));
+  const editorModels = useRef(new Set<editor.ITextModel>());
+  const modelListener = useRef<{ dispose: () => void } | null>(null);
+  const onEditorReady = useCallback((instance: editor.IStandaloneCodeEditor | null) => {
+    modelListener.current?.dispose();
+    modelListener.current = null;
+    setEditorInstance(instance);
+    if (!instance) return;
+    const trackModel = () => {
+      const model = instance.getModel();
+      if (model) editorModels.current.add(model);
+    };
+    trackModel();
+    modelListener.current = instance.onDidChangeModel(trackModel);
+  }, []);
+  useEffect(() => () => {
+    modelListener.current?.dispose();
+    for (const model of editorModels.current) model.dispose();
+    editorModels.current.clear();
+  }, []);
   const sidebarWidth = 248;
 
   const files = useMemo(
@@ -221,6 +261,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   }
 
   function markSaved(path: string, content: string) {
+    originalsRef.current = { ...originalsRef.current, [path]: content };
     setOriginalContents((current) => ({
       ...current,
       [path]: content,
@@ -228,7 +269,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     setDirtyPaths((current) => {
       if (!current.has(path)) return current;
       const next = new Set(current);
-      next.delete(path);
+      if (contentsRef.current[path]?.content === content) next.delete(path);
       return next;
     });
   }
@@ -476,26 +517,72 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     ];
   }
 
-  async function closeAllDirtyTabsAndLeave() {
-    if (dirtyPaths.size === 0) {
-      onBackToHome();
-      return;
-    }
+  function reportError(error: unknown) {
+    setError(error instanceof Error ? error.message : String(error));
+  }
 
-    const confirmed = await confirm(
-      `Existem ${dirtyPaths.size} arquivo(s) com alterações recentes. Voltar para a tela inicial mesmo assim?`,
-      {
-        title: "Alterações pendentes",
-        kind: "warning",
-        okLabel: "Voltar mesmo assim",
-        cancelLabel: "Continuar editando",
-      },
-    );
-
-    if (confirmed) {
-      onBackToHome();
+  async function saveFile(path: string) {
+    const content = contentsRef.current[path]?.content;
+    if (content === undefined) return;
+    setError(null);
+    setSaveState("saving");
+    try {
+      await saveQueue.current.save(path, content);
+      markSaved(path, content);
+      if (contentsRef.current[path]?.content === content) clearRecoverySnapshot(projectPath, path);
+      setSaveState("saved");
+    } catch (error) {
+      markDirty(path);
+      setSaveState("error");
+      throw new Error(`Não foi possível salvar ${path}: ${error}`);
     }
   }
+
+  async function saveAll() {
+    const paths = Object.keys(contentsRef.current).filter(
+      (path) => contentsRef.current[path].content !== originalsRef.current[path] || saveQueue.current.isPending(path),
+    );
+    const results = await Promise.allSettled(paths.map(saveFile));
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length) {
+      setSaveState("error");
+      throw new Error(failures.map((result) => String(result.reason)).join("\n"));
+    }
+  }
+
+  async function leaveWorkspace(action: () => void | Promise<void>) {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    setIsLeaving(true);
+    try {
+      const pending = Object.keys(contentsRef.current).some(
+        (path) => contentsRef.current[path].content !== originalsRef.current[path] || saveQueue.current.isPending(path),
+      );
+      if (pending && !await confirm("Salvar as alterações pendentes antes de continuar?", {
+        title: "Alterações pendentes", kind: "warning", okLabel: "Salvar e continuar", cancelLabel: "Cancelar",
+      })) return;
+      await saveAll();
+      await action();
+    } catch (error) { reportError(error); }
+    finally { leavingRef.current = false; setIsLeaving(false); }
+  }
+
+  const closeAllDirtyTabsAndLeave = () => leaveWorkspace(onBackToHome);
+  const exitWorkspace = () => leaveWorkspace(() => getCurrentWindow().destroy());
+  const exitRef = useRef(exitWorkspace);
+  exitRef.current = exitWorkspace;
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow().onCloseRequested((event) => {
+      event.preventDefault();
+      void exitRef.current();
+    }).then((cleanup) => {
+      if (disposed) cleanup(); else unlisten = cleanup;
+    }).catch(reportError);
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -536,7 +623,11 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         if (openTabPaths.length === 0 && firstPath) {
           setOpenTabPaths([firstPath]);
         } else {
-          setOpenTabPaths((current) => current.filter((path) => projectEntries.some((entry) => entry.kind === "file" && entry.path === path)));
+          setOpenTabPaths((current) => {
+            const next = current.filter((path) => projectEntries.some((entry) => entry.kind === "file" && entry.path === path));
+            if (pendingActivePath && firstPath === pendingActivePath && !next.includes(firstPath)) next.push(firstPath);
+            return next;
+          });
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -561,20 +652,21 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
     let cancelled = false;
 
+    const file = activeFile;
     async function loadFile() {
       setError(null);
 
       try {
-        const diskContent = await readProjectFile(activeFile.path);
+        const diskContent = await readProjectFile(file.path);
         if (cancelled) return;
 
-        const recovery = getRecoverySnapshot(projectPath, activeFile.path);
+        const recovery = getRecoverySnapshot(projectPath, file.path);
         let content = diskContent;
         let recovered = false;
 
         if (recovery && recovery.content !== diskContent) {
           const restore = await confirm(
-            `O Corant encontrou uma versão recuperável de “${activeFile.name}” criada em ${new Date(recovery.updatedAt).toLocaleString()}. Deseja restaurar essa versão?`,
+            `O Corant encontrou uma versão recuperável de “${file.name}” criada em ${new Date(recovery.updatedAt).toLocaleString()}. Deseja restaurar essa versão?`,
             {
               title: "Recuperar alterações",
               kind: "warning",
@@ -589,32 +681,32 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
             content = recovery.content;
             recovered = true;
           } else {
-            clearRecoverySnapshot(projectPath, activeFile.path);
+            clearRecoverySnapshot(projectPath, file.path);
           }
         } else if (recovery) {
-          clearRecoverySnapshot(projectPath, activeFile.path);
+          clearRecoverySnapshot(projectPath, file.path);
         }
 
         setFileContents((current) => ({
           ...current,
-          [activeFile.path]: {
+          [file.path]: {
             content,
-            language: getLanguage(activeFile.name),
+            language: getLanguage(file.name),
           },
         }));
         setOriginalContents((current) => ({
           ...current,
-          [activeFile.path]: diskContent,
+          [file.path]: diskContent,
         }));
         setDirtyPaths((current) => {
           const next = new Set(current);
-          if (recovered) next.add(activeFile.path);
-          else next.delete(activeFile.path);
+          if (recovered) next.add(file.path);
+          else next.delete(file.path);
           return next;
         });
       } catch (readError) {
         if (!cancelled) {
-          setError(`Não foi possível abrir ${activeFile.name}: ${readError}`);
+          setError(`Não foi possível abrir ${file.name}: ${readError}`);
         }
       }
     }
@@ -644,26 +736,18 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     setSaveState("saving");
 
     const timer = window.setTimeout(() => {
-      void saveProjectFile(activeFile.path, activeContent.content)
-        .then(() => {
-          markSaved(activeFile.path, activeContent.content);
-          clearRecoverySnapshot(projectPath, activeFile.path);
-          setSaveState("saved");
-        })
-        .catch(() => {
-          markDirty(activeFile.path);
-          setSaveState("error");
-        });
+      void saveFile(activeFile.path).catch(reportError);
     }, 500);
 
     return () => window.clearTimeout(timer);
   }, [activeFile, activeContent, originalContents, projectPath]);
 
   function updateActiveFile(value: string) {
-    if (!activeFile) return;
+    if (!activeFile || leavingRef.current) return;
 
     markDirty(activeFile.path);
     saveRecoverySnapshot(projectPath, activeFile.path, value);
+    contentsRef.current = { ...contentsRef.current, [activeFile.path]: { content: value, language: getLanguage(activeFile.name) } };
     setFileContents((current) => ({
       ...current,
       [activeFile.path]: {
@@ -856,6 +940,105 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     }
   }
 
+  function showSidebar(mode: "explorer" | "search") {
+    setSidebarVisible(true);
+    setSidebarMode(mode);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(mode === "search" ? ".global-search-panel input" : ".tree-project-name")?.focus();
+    });
+  }
+
+  function switchTab(direction: 1 | -1) {
+    const index = openTabPaths.indexOf(activeFilePath ?? "");
+    const path = openTabPaths[(index + direction + openTabPaths.length) % openTabPaths.length];
+    const file = files.find((entry) => entry.path === path);
+    if (file) openFile(file);
+  }
+
+  function editorCommand(id: string, label: string, shortcut?: string, separatorBefore = false): WorkspaceMenuItem {
+    return { id, label, shortcut, separatorBefore, disabled: !activeContent || !editorInstance,
+      onSelect: () => { if (editorInstance) return runEditorCommand(editorInstance, id); } };
+  }
+
+  const menus: WorkspaceMenu[] = [
+    { label: "Arquivo", items: [
+      { id: "new-file", label: "Novo arquivo…", shortcut: "Ctrl+N", onSelect: () => openNameDialog("file") },
+      { id: "new-folder", label: "Nova pasta…", onSelect: () => openNameDialog("folder") },
+      { id: "open-project", label: "Abrir projeto…", shortcut: "Ctrl+O", separatorBefore: true, onSelect: () => leaveWorkspace(onOpenProject) },
+      { id: "save", label: "Salvar", shortcut: "Ctrl+S", separatorBefore: true, disabled: !activeContent, onSelect: () => activeFile ? saveFile(activeFile.path) : undefined },
+      { id: "save-all", label: "Salvar tudo", shortcut: "Ctrl+Shift+S", disabled: dirtyPaths.size === 0, onSelect: saveAll },
+      { id: "close-tab", label: "Fechar aba", shortcut: "Ctrl+W", separatorBefore: true, disabled: !activeFile, onSelect: () => activeFile ? closeTab(activeFile.path) : undefined },
+      { id: "close-tabs", label: "Fechar todas as abas", disabled: openTabs.length === 0, onSelect: () => closeTabs(openTabPaths) },
+      { id: "close-project", label: "Fechar projeto", onSelect: closeAllDirtyTabsAndLeave },
+      { id: "exit", label: "Sair", separatorBefore: true, disabled: !isTauri(), onSelect: exitWorkspace },
+    ] },
+    { label: "Editar", items: [
+      editorCommand("undo", "Desfazer", "Ctrl+Z"),
+      editorCommand("redo", "Refazer", "Ctrl+Y"),
+      editorCommand("cut", "Recortar", "Ctrl+X", true),
+      editorCommand("copy", "Copiar", "Ctrl+C"),
+      editorCommand("paste", "Colar", "Ctrl+V"),
+      editorCommand("deleteRight", "Excluir", "Delete"),
+      editorCommand("editor.action.selectAll", "Selecionar tudo", "Ctrl+A", true),
+      editorCommand("actions.find", "Localizar…", "Ctrl+F", true),
+      editorCommand("editor.action.startFindReplaceAction", "Substituir…", "Ctrl+H"),
+    ] },
+    { label: "Seleção", items: [
+      editorCommand("editor.action.selectAll", "Selecionar tudo", "Ctrl+A"),
+      editorCommand("expandLineSelection", "Selecionar linha", "Ctrl+L"),
+      editorCommand("editor.action.smartSelect.expand", "Expandir seleção", "Shift+Alt+→", true),
+      editorCommand("editor.action.smartSelect.shrink", "Reduzir seleção", "Shift+Alt+←"),
+      editorCommand("editor.action.addSelectionToNextFindMatch", "Adicionar próxima ocorrência", "Ctrl+D", true),
+      editorCommand("editor.action.selectHighlights", "Selecionar todas as ocorrências", "Ctrl+Shift+L"),
+    ] },
+    { label: "Exibir", items: [
+      { id: "explorer", label: "Explorer", shortcut: "Ctrl+Shift+E", onSelect: () => showSidebar("explorer") },
+      { id: "search", label: "Busca global", shortcut: "Ctrl+Shift+F", onSelect: () => showSidebar("search") },
+      { id: "sidebar", label: "Barra lateral", shortcut: "Ctrl+B", checked: sidebarVisible, separatorBefore: true, onSelect: () => setSidebarVisible((value) => !value) },
+      { id: "minimap", label: "Minimapa", checked: minimap, onSelect: () => setMinimap((value) => !value) },
+      { id: "wrap", label: "Quebra automática de linha", shortcut: "Alt+Z", checked: wordWrap, onSelect: () => setWordWrap((value) => !value) },
+      { id: "next-tab", label: "Próxima aba", shortcut: "Ctrl+Tab", separatorBefore: true, disabled: openTabs.length < 2, onSelect: () => switchTab(1) },
+      { id: "previous-tab", label: "Aba anterior", shortcut: "Ctrl+Shift+Tab", disabled: openTabs.length < 2, onSelect: () => switchTab(-1) },
+      { id: "refresh", label: "Atualizar Explorer", onSelect: () => setRefreshKey((value) => value + 1) },
+    ] },
+    { label: "Executar", items: [
+      { id: "run-unavailable", label: "Execução ainda não disponível", disabled: true, onSelect: () => undefined },
+    ] },
+    { label: "Terminal", items: [
+      { id: "terminal-unavailable", label: "Terminal integrado em breve", disabled: true, onSelect: () => undefined },
+    ] },
+    { label: "Ajuda", items: [
+      { id: "help", label: "Guia e atalhos", shortcut: "F1", onSelect: () => setHelpPage("help") },
+      { id: "about", label: "Sobre o Corant", onSelect: () => setHelpPage("about") },
+    ] },
+  ];
+
+  useEffect(() => {
+    function handleShortcut(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || nameDialog || helpPage || isLeaving) return;
+      const mod = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      let command: (() => unknown) | undefined;
+      if (mod && !event.altKey) {
+        if (key === "s") command = event.shiftKey ? saveAll : () => activeFile && saveFile(activeFile.path);
+        else if (key === "n" && !event.shiftKey) command = () => openNameDialog("file");
+        else if (key === "o" && !event.shiftKey) command = () => leaveWorkspace(onOpenProject);
+        else if (key === "w" && !event.shiftKey) command = () => activeFile && closeTab(activeFile.path);
+        else if (key === "b" && !event.shiftKey) command = () => setSidebarVisible((value) => !value);
+        else if (key === "f" && event.shiftKey) command = () => showSidebar("search");
+        else if (key === "e" && event.shiftKey) command = () => showSidebar("explorer");
+        else if (key === "tab") command = () => switchTab(event.shiftKey ? -1 : 1);
+      } else if (!mod && event.altKey && key === "z") command = () => setWordWrap((value) => !value);
+      else if (!mod && !event.altKey && key === "f1") command = () => setHelpPage("help");
+      if (command) {
+        event.preventDefault(); event.stopPropagation();
+        try { Promise.resolve(command()).catch(reportError); } catch (error) { reportError(error); }
+      }
+    }
+    window.addEventListener("keydown", handleShortcut, true);
+    return () => window.removeEventListener("keydown", handleShortcut, true);
+  });
+
   return (
     <main className="workspace-shell">
       <header className="workspace-titlebar">
@@ -873,24 +1056,21 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
         <div className="workspace-titlebar-actions">
           <span className={`save-indicator save-indicator-${saveState}`}>
             {saveState === "saving" && "● Salvando..."}
-            {saveState === "saved" && "● Salvo"}
+            {saveState === "saved" && (dirtyPaths.size ? "● Alterações pendentes" : "● Salvo")}
             {saveState === "error" && "● Erro ao salvar"}
           </span>
         </div>
       </header>
 
-      <div className="workspace-menubar">
-        <button type="button">Arquivo</button>
-        <button type="button">Editar</button>
-        <button type="button">Seleção</button>
-        <button type="button">Exibir</button>
-        <button type="button">Executar</button>
-        <button type="button">Terminal</button>
-        <button type="button">Ajuda</button>
+      <div inert={isLeaving || !!nameDialog || !!helpPage}>
+        <WorkspaceMenuBar menus={menus} onError={reportError} />
       </div>
+      {error && <div role="alert" className="workspace-error-banner">{error}
+        <button type="button" aria-label="Dispensar erro" onClick={() => setError(null)}>×</button>
+      </div>}
 
-      <section className="workspace-body">
-        <aside className="workspace-sidebar" style={{ width: sidebarWidth }}>
+      <section className="workspace-body" inert={isLeaving}>
+        <aside className="workspace-sidebar" style={{ width: sidebarWidth, display: sidebarVisible ? undefined : "none" }}>
           {sidebarMode === "explorer" ? (
             <>
               <div className="sidebar-heading">
@@ -932,7 +1112,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                   <div className="tree-message">Pasta vazia</div>
                 )}
 
-                {!isLoading && !error && entries.length > 0 && (
+                {!isLoading && entries.length > 0 && (
                   <div className="tree-files">
                     {entries.filter(isEntryVisible).map((entry) => (
                       <button
@@ -999,7 +1179,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
           )}
         </aside>
 
-        <div className="workspace-sidebar-resizer" aria-hidden="true" />
+        {sidebarVisible && <div className="workspace-sidebar-resizer" aria-hidden="true" />}
 
         <section className="workspace-editor-area">
           <div className="editor-tabs" role="tablist" aria-label="Arquivos abertos">
@@ -1057,9 +1237,14 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
 
               <div className="monaco-host">
                 <MonacoEditor
+                  path={activeFile.path}
                   value={activeContent.content}
                   language={activeContent.language}
                   onChange={updateActiveFile}
+                  onReady={onEditorReady}
+                  wordWrap={wordWrap}
+                  minimap={minimap}
+                  readOnly={isLeaving}
                   targetLocation={editorLocation?.path === activeFile.path ? editorLocation : undefined}
                 />
               </div>
@@ -1105,6 +1290,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
           onSubmit={handleNameSubmit}
         />
       )}
+      {helpPage && <WorkspaceHelpDialog page={helpPage} onClose={() => setHelpPage(null)} />}
     </main>
   );
 }

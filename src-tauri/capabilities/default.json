@@ -7,6 +7,7 @@
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-destroy",
     "fs:default",
     "fs:allow-read-dir",
     "fs:allow-read-text-file",

@@ -31,3 +31,5 @@ Thumbs.db
 
 # Generated
 coverage/
+test-results/
+playwright-report/
