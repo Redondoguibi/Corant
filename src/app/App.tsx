@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { WelcomeScreen } from "../components/layout/WelcomeScreen";
@@ -9,6 +9,24 @@ import "../styles/app.css";
 export function App() {
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [project, setProject] = useState<{ name: string; path: string } | null>(null);
+
+  useEffect(() => {
+    function suppressWebViewContextMenu(event: MouseEvent) {
+      const target = event.target instanceof Element ? event.target : null;
+
+      if (target?.closest(".monaco-editor")) {
+        return;
+      }
+
+      event.preventDefault();
+    }
+
+    document.addEventListener("contextmenu", suppressWebViewContextMenu);
+
+    return () => {
+      document.removeEventListener("contextmenu", suppressWebViewContextMenu);
+    };
+  }, []);
 
   async function handleCreateProject(name: string, parentPath: string) {
     const projectPath = await invoke<string>("create_project_directory", {
