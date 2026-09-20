@@ -313,6 +313,8 @@ A configuração principal está em [`src-tauri/tauri.conf.json`](src-tauri/taur
 
 A aplicação atualmente é configurada como uma janela desktop redimensionável e usa os assets gerados no diretório de ícones do Tauri.
 
+O Explorer usa permissões explícitas do Tauri para as operações de filesystem que já fazem parte do núcleo atual: listar diretórios, ler e escrever arquivos de texto, criar pastas, renomear e excluir arquivos/pastas. Essas permissões são declaradas em [`src-tauri/capabilities/default.json`](src-tauri/capabilities/default.json) e continuam limitadas pelo scope dinâmico da pasta de projeto autorizada pelo Corant, em vez de conceder acesso irrestrito ao filesystem do computador.
+
 O Vite também é configurado para ignorar `src-tauri` no watcher, evitando conflitos com arquivos gerados pelo Cargo durante o desenvolvimento.
 
 ## Documentação
