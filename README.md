@@ -100,12 +100,25 @@ A implementação inicial de recuperação está em [`recoveryStore.ts`](src/ser
 
 > Esta é a primeira versão robusta da recuperação. Melhorias futuras podem substituir o armazenamento do WebView por um journal nativo/Tauri se isso se mostrar necessário.
 
-### ⏳ Parte 4 — Busca global
+### ✅ Parte 4 — Busca global
 
-Planejada em duas fases:
+A busca global foi implementada dentro do workspace em duas camadas integradas.
 
-1. busca por nome de arquivos e pastas;
-2. busca por conteúdo em todo o projeto, com resultados contextualizados e abertura direta do arquivo.
+Inclui atualmente:
+
+- busca por nome de arquivos e pastas em todo o projeto;
+- busca por conteúdo nos arquivos de texto relevantes;
+- resultados de conteúdo agrupados por arquivo e linha;
+- abertura direta de arquivos a partir dos resultados;
+- posicionamento do Monaco Editor na linha e coluna do resultado selecionado;
+- integração com o sistema de abas existente, sem criar abas duplicadas;
+- uso do conteúdo em memória para arquivos já carregados, incluindo alterações ainda recentes;
+- debounce e cancelamento cooperativo de buscas antigas para manter a interface responsiva;
+- exclusão inicial de diretórios de dependências/artefatos comuns, como `.git`, `node_modules`, `target`, `dist`, `build`, `.next` e `coverage`;
+- exclusão de extensões binárias comuns da busca textual;
+- limites de resultados para evitar renderizações excessivas em buscas muito amplas.
+
+A interface está em [`GlobalSearchPanel.tsx`](src/components/editor/GlobalSearchPanel.tsx), a lógica de busca está em [`projectSearch.ts`](src/services/projectSearch.ts) e a navegação para resultados é integrada ao [`Workspace.tsx`](src/components/editor/Workspace.tsx) e ao [`MonacoEditor.tsx`](src/components/editor/monaco/MonacoEditor.tsx).
 
 ### ⏳ Parte 5 — Menus funcionais
 
