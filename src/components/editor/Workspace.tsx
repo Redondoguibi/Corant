@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { MonacoEditor } from "./monaco/MonacoEditor";
 import { ExplorerNameDialog } from "./ExplorerNameDialog";
 import { GlobalSearchPanel } from "./GlobalSearchPanel";
+import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import {
   createProjectDirectory,
   createProjectFile,
@@ -42,6 +44,21 @@ type EditorSearchLocation = {
   lineNumber: number;
   column: number;
 };
+
+type WorkspaceContextMenuState =
+  | {
+      kind: "explorer";
+      x: number;
+      y: number;
+      targetPath: string | null;
+    }
+  | {
+      kind: "tab";
+      x: number;
+      y: number;
+      targetPath: string;
+    }
+  | null;
 
 function getLanguage(name: string) {
   const extension = name.split(".").pop()?.toLowerCase();
@@ -167,6 +184,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
   const [nameDialog, setNameDialog] = useState<NameDialogState>(null);
   const [sidebarMode, setSidebarMode] = useState<"explorer" | "search">("explorer");
   const [editorLocation, setEditorLocation] = useState<EditorSearchLocation | null>(null);
+  const [contextMenu, setContextMenu] = useState<WorkspaceContextMenuState>(null);
   const sidebarWidth = 248;
 
   const files = useMemo(
@@ -265,36 +283,197 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
     activateFile(file, { lineNumber, column });
   }
 
-  async function closeTab(path: string) {
-    const isDirty = dirtyPaths.has(path);
-
-    if (isDirty) {
-      const file = files.find((entry) => entry.path === path);
-      const confirmed = await confirm(
-        `“${file?.name ?? "Arquivo"}” possui alterações recentes que ainda não foram confirmadas como salvas. Fechar a aba mesmo assim?`,
-        {
-          title: "Fechar arquivo",
-          kind: "warning",
-          okLabel: "Fechar mesmo assim",
-          cancelLabel: "Cancelar",
-        },
-      );
-
-      if (!confirmed) return;
+  async function confirmTabClose(path: string) {
+    if (!dirtyPaths.has(path)) {
+      return true;
     }
 
-    setOpenTabPaths((current) => {
-      const index = current.indexOf(path);
-      const next = current.filter((item) => item !== path);
+    const file = files.find((entry) => entry.path === path);
+    return confirm(
+      `“${file?.name ?? "Arquivo"}” possui alterações recentes que ainda não foram confirmadas como salvas. Fechar a aba mesmo assim?`,
+      {
+        title: "Fechar arquivo",
+        kind: "warning",
+        okLabel: "Fechar mesmo assim",
+        cancelLabel: "Cancelar",
+      },
+    );
+  }
 
-      if (activeFilePath === path) {
-        const fallback = next[index] ?? next[index - 1] ?? next.at(-1) ?? null;
+  async function closeTabs(paths: string[]) {
+    const targets = [...new Set(paths)].filter((path) => openTabPaths.includes(path));
+
+    for (const path of targets) {
+      const confirmed = await confirmTabClose(path);
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    const pathsToClose = new Set(targets);
+
+    setOpenTabPaths((current) => {
+      const activeIndex = activeFilePath ? current.indexOf(activeFilePath) : -1;
+      const next = current.filter((path) => !pathsToClose.has(path));
+
+      if (activeFilePath && pathsToClose.has(activeFilePath)) {
+        const fallback = next[activeIndex] ?? next[activeIndex - 1] ?? next.at(-1) ?? null;
         setActiveFilePath(fallback);
         setSelectedEntryPath(fallback);
+        setEditorLocation(null);
       }
 
       return next;
     });
+
+    return true;
+  }
+
+  async function closeTab(path: string) {
+    return closeTabs([path]);
+  }
+
+  function openExplorerContextMenu(
+    event: ReactMouseEvent<HTMLElement>,
+    entry: ProjectFile | null,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedEntryPath(entry?.path ?? null);
+    setContextMenu({
+      kind: "explorer",
+      x: event.clientX,
+      y: event.clientY,
+      targetPath: entry?.path ?? null,
+    });
+  }
+
+  function openTabContextMenu(event: ReactMouseEvent<HTMLElement>, path: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      kind: "tab",
+      x: event.clientX,
+      y: event.clientY,
+      targetPath: path,
+    });
+  }
+
+  function getContextMenuItems(): ContextMenuItem[] {
+    if (!contextMenu) {
+      return [];
+    }
+
+    if (contextMenu.kind === "explorer") {
+      const entry = contextMenu.targetPath
+        ? entries.find((item) => item.path === contextMenu.targetPath) ?? null
+        : null;
+
+      if (!entry) {
+        return [
+          {
+            id: "new-file",
+            label: "Novo Arquivo",
+            onSelect: () => openNameDialog("file"),
+          },
+          {
+            id: "new-folder",
+            label: "Nova Pasta",
+            onSelect: () => openNameDialog("folder"),
+          },
+          {
+            id: "refresh",
+            label: "Atualizar",
+            separatorBefore: true,
+            onSelect: () => setRefreshKey((current) => current + 1),
+          },
+        ];
+      }
+
+      if (entry.kind === "directory") {
+        return [
+          {
+            id: "new-file",
+            label: "Novo Arquivo",
+            onSelect: () => openNameDialog("file"),
+          },
+          {
+            id: "new-folder",
+            label: "Nova Pasta",
+            onSelect: () => openNameDialog("folder"),
+          },
+          {
+            id: "rename",
+            label: "Renomear",
+            separatorBefore: true,
+            onSelect: openRenameDialog,
+          },
+          {
+            id: "delete",
+            label: "Excluir",
+            danger: true,
+            onSelect: handleDeleteSelected,
+          },
+          {
+            id: "refresh",
+            label: "Atualizar",
+            separatorBefore: true,
+            onSelect: () => setRefreshKey((current) => current + 1),
+          },
+        ];
+      }
+
+      return [
+        {
+          id: "open",
+          label: "Abrir",
+          onSelect: () => openFile(entry),
+        },
+        {
+          id: "rename",
+          label: "Renomear",
+          separatorBefore: true,
+          onSelect: openRenameDialog,
+        },
+        {
+          id: "delete",
+          label: "Excluir",
+          danger: true,
+          onSelect: handleDeleteSelected,
+        },
+      ];
+    }
+
+    const tabIndex = openTabPaths.indexOf(contextMenu.targetPath);
+    const pathsToRight = tabIndex >= 0 ? openTabPaths.slice(tabIndex + 1) : [];
+
+    return [
+      {
+        id: "close",
+        label: "Fechar",
+        onSelect: () => closeTab(contextMenu.targetPath),
+      },
+      {
+        id: "close-others",
+        label: "Fechar Outras",
+        separatorBefore: true,
+        disabled: openTabPaths.length <= 1,
+        onSelect: () => closeTabs(
+          openTabPaths.filter((path) => path !== contextMenu.targetPath),
+        ),
+      },
+      {
+        id: "close-right",
+        label: "Fechar à Direita",
+        disabled: pathsToRight.length === 0,
+        onSelect: () => closeTabs(pathsToRight),
+      },
+      {
+        id: "close-all",
+        label: "Fechar Todas",
+        onSelect: () => closeTabs(openTabPaths),
+      },
+    ];
   }
 
   async function closeAllDirtyTabsAndLeave() {
@@ -732,11 +911,15 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                 </div>
               </div>
 
-              <div className="project-tree">
+              <div
+                className="project-tree"
+                onContextMenu={(event) => openExplorerContextMenu(event, null)}
+              >
                 <button
                   className={`tree-project-name ${selectedEntryPath === null ? "is-root-selected" : ""}`}
                   type="button"
                   onClick={() => setSelectedEntryPath(null)}
+                  onContextMenu={(event) => openExplorerContextMenu(event, null)}
                   title="Selecionar a raiz do projeto"
                 >
                   <span className="tree-chevron">⌄</span>
@@ -765,6 +948,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                             openFile(entry);
                           }
                         }}
+                        onContextMenu={(event) => openExplorerContextMenu(event, entry)}
                         title={entry.relativePath}
                       >
                         <span className="file-icon">
@@ -827,6 +1011,7 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
                 <div
                   className={`editor-tab ${isActive ? "is-active" : ""} ${isDirty ? "is-dirty" : ""}`}
                   key={file.path}
+                  onContextMenu={(event) => openTabContextMenu(event, file.path)}
                 >
                   <button
                     className="editor-tab-main"
@@ -902,6 +1087,15 @@ export function Workspace({ projectName, projectPath, onBackToHome }: WorkspaceP
           )}
         </section>
       </section>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={getContextMenuItems()}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
 
       {nameDialog && (
         <ExplorerNameDialog
