@@ -25,8 +25,15 @@ export function MonacoEditor({
   function revealTarget(editorInstance: editor.IStandaloneCodeEditor) {
     if (!targetLocation) return;
 
-    const lineNumber = Math.max(1, targetLocation.lineNumber);
-    const column = Math.max(1, targetLocation.column);
+    const model = editorInstance.getModel();
+    const requestedLine = Math.max(1, targetLocation.lineNumber);
+    const lineNumber = model
+      ? Math.min(requestedLine, model.getLineCount())
+      : requestedLine;
+    const requestedColumn = Math.max(1, targetLocation.column);
+    const column = model
+      ? Math.min(requestedColumn, model.getLineMaxColumn(lineNumber))
+      : requestedColumn;
 
     editorInstance.setPosition({ lineNumber, column });
     editorInstance.revealPositionInCenter({ lineNumber, column });
@@ -44,8 +51,15 @@ export function MonacoEditor({
   };
 
   useEffect(() => {
-    if (!editorRef.current || !targetLocation) return;
-    revealTarget(editorRef.current);
+    if (!targetLocation) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (editorRef.current) {
+        revealTarget(editorRef.current);
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
   }, [targetLocation]);
 
   return (
