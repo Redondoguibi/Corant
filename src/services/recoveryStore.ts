@@ -1,3 +1,5 @@
+import { affectsProjectPath, remapProjectPath } from "./projectPaths";
+
 const STORAGE_KEY = "corant.recovery.v1";
 
 type RecoverySnapshot = {
@@ -72,4 +74,24 @@ export function clearRecoverySnapshot(projectPath: string, filePath: string) {
 
 export function clearProjectRecoverySnapshots(projectPath: string) {
   writeSnapshots(readSnapshots().filter((snapshot) => snapshot.projectPath !== projectPath));
+}
+
+export function moveRecoverySnapshotsForPath(projectPath: string, oldPath: string, newPath: string, directory = false) {
+  if (oldPath === newPath) return;
+  const snapshots = readSnapshots();
+  const moved = snapshots.filter((snapshot) => snapshot.projectPath === projectPath && affectsProjectPath(snapshot.filePath, oldPath, directory))
+    .map((snapshot) => ({ ...snapshot, filePath: remapProjectPath(snapshot.filePath, oldPath, newPath, directory) }));
+  // One storage write preserves timestamps and replaces any stale destination snapshot.
+  writeSnapshots([
+    ...snapshots.filter((snapshot) => snapshot.projectPath !== projectPath || (
+      !affectsProjectPath(snapshot.filePath, oldPath, directory) && !moved.some((item) => item.filePath === snapshot.filePath)
+    )),
+    ...moved,
+  ]);
+}
+
+export function clearRecoverySnapshotsForPath(projectPath: string, path: string, directory = false) {
+  writeSnapshots(readSnapshots().filter((snapshot) =>
+    snapshot.projectPath !== projectPath || !affectsProjectPath(snapshot.filePath, path, directory),
+  ));
 }

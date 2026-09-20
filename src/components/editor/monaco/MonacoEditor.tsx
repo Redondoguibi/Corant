@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 
 type EditorLocation = {
@@ -13,7 +13,7 @@ type MonacoEditorProps = {
   language: string;
   onChange: (value: string) => void;
   targetLocation?: EditorLocation;
-  onReady: (instance: editor.IStandaloneCodeEditor | null) => void;
+  onReady: (instance: editor.IStandaloneCodeEditor | null, monaco?: Monaco) => void;
   wordWrap: boolean;
   minimap: boolean;
   readOnly: boolean;
@@ -50,9 +50,9 @@ export function MonacoEditor({
     editorInstance.focus();
   }
 
-  const handleMount: OnMount = (editorInstance) => {
+  const handleMount: OnMount = (editorInstance, monaco) => {
     editorRef.current = editorInstance;
-    onReady(editorInstance);
+    onReady(editorInstance, monaco);
 
     if (targetLocation) {
       revealTarget(editorInstance);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { editor } from "monaco-editor";
+import type { Monaco } from "@monaco-editor/react";
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -11,6 +12,7 @@ import { WorkspaceMenuBar, type WorkspaceMenu, type WorkspaceMenuItem } from "./
 import { WorkspaceHelpDialog } from "./WorkspaceHelpDialog";
 import { createFileSaveQueue } from "../../services/fileSaveQueue";
 import { runEditorCommand } from "../../services/editorCommands";
+import { affectsProjectPath, remapProjectPath } from "../../services/projectPaths";
 import "../../styles/menus.css";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import {
@@ -25,6 +27,8 @@ import {
 } from "../../services/projectFilesystem";
 import {
   clearRecoverySnapshot,
+  clearRecoverySnapshotsForPath,
+  moveRecoverySnapshotsForPath,
   getRecoverySnapshot,
   saveRecoverySnapshot,
 } from "../../services/recoveryStore";
@@ -176,6 +180,14 @@ function collectDirectoryPaths(entries: ProjectFile[]) {
   );
 }
 
+function disposeObsoleteModel(model: editor.ITextModel) {
+  if (model.isDisposed()) return;
+  // Monaco can restore a disposed model's undo stack by URI. setValue clears that
+  // stack through its public API, even when the text itself has not changed.
+  model.setValue(model.getValue());
+  model.dispose();
+}
+
 export function Workspace({ projectName, projectPath, onBackToHome, onOpenProject }: WorkspaceProps) {
   const [entries, setEntries] = useState<ProjectFile[]>([]);
   const [openTabPaths, setOpenTabPaths] = useState<string[]>([]);
@@ -201,14 +213,20 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const leavingRef = useRef(false);
+  const [isMutating, setIsMutating] = useState(false);
+  const mutationRef = useRef(false);
+  const autosaveTimers = useRef(new Map<string, { timer: number; content: string }>());
   const contentsRef = useRef(fileContents);
   const originalsRef = useRef(originalContents);
   contentsRef.current = fileContents;
   originalsRef.current = originalContents;
   const saveQueue = useRef(createFileSaveQueue(saveProjectFile));
   const editorModels = useRef(new Set<editor.ITextModel>());
+  const obsoleteModels = useRef(new Set<editor.ITextModel>());
+  const monacoRef = useRef<Monaco | null>(null);
   const modelListener = useRef<{ dispose: () => void } | null>(null);
-  const onEditorReady = useCallback((instance: editor.IStandaloneCodeEditor | null) => {
+  const onEditorReady = useCallback((instance: editor.IStandaloneCodeEditor | null, monaco?: Monaco) => {
+    if (monaco) monacoRef.current = monaco;
     modelListener.current?.dispose();
     modelListener.current = null;
     setEditorInstance(instance);
@@ -221,10 +239,22 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     modelListener.current = instance.onDidChangeModel(trackModel);
   }, []);
   useEffect(() => () => {
+    for (const { timer } of autosaveTimers.current.values()) window.clearTimeout(timer);
+    autosaveTimers.current.clear();
     modelListener.current?.dispose();
-    for (const model of editorModels.current) model.dispose();
+    const models = [...editorModels.current];
+    // Let the wrapper detach its change listeners before clearing models on exit.
+    queueMicrotask(() => models.forEach(disposeObsoleteModel));
     editorModels.current.clear();
   }, []);
+  // Dispose only after React/Monaco has switched away from the old model.
+  useEffect(() => {
+    for (const model of obsoleteModels.current) {
+      disposeObsoleteModel(model);
+      editorModels.current.delete(model);
+    }
+    obsoleteModels.current.clear();
+  });
   const sidebarWidth = 248;
 
   const files = useMemo(
@@ -251,11 +281,11 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
 
   const activeContent = activeFile ? fileContents[activeFile.path] : null;
 
-  function markDirty(path: string) {
+  function reconcileDirty(path: string, savedContent = originalsRef.current[path]) {
     setDirtyPaths((current) => {
-      if (current.has(path)) return current;
       const next = new Set(current);
-      next.add(path);
+      if (contentsRef.current[path] && contentsRef.current[path].content !== savedContent) next.add(path);
+      else next.delete(path);
       return next;
     });
   }
@@ -266,12 +296,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       ...current,
       [path]: content,
     }));
-    setDirtyPaths((current) => {
-      if (!current.has(path)) return current;
-      const next = new Set(current);
-      if (contentsRef.current[path]?.content === content) next.delete(path);
-      return next;
-    });
+    reconcileDirty(path, content);
   }
 
   function activateFile(
@@ -325,49 +350,51 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }
 
   async function confirmTabClose(path: string) {
-    if (!dirtyPaths.has(path)) {
+    if (!contentsRef.current[path] || contentsRef.current[path].content === originalsRef.current[path]) {
       return true;
     }
 
     const file = files.find((entry) => entry.path === path);
     return confirm(
-      `“${file?.name ?? "Arquivo"}” possui alterações recentes que ainda não foram confirmadas como salvas. Fechar a aba mesmo assim?`,
+      `Descartar as alterações não salvas de “${file?.name ?? "Arquivo"}” e fechar a aba? A versão já salva no disco será mantida.`,
       {
         title: "Fechar arquivo",
         kind: "warning",
-        okLabel: "Fechar mesmo assim",
+        okLabel: "Descartar e fechar",
         cancelLabel: "Cancelar",
       },
     );
   }
 
   async function closeTabs(paths: string[]) {
+    if (mutationRef.current || leavingRef.current) return false;
     const targets = [...new Set(paths)].filter((path) => openTabPaths.includes(path));
-
-    for (const path of targets) {
-      const confirmed = await confirmTabClose(path);
-      if (!confirmed) {
-        return false;
-      }
-    }
-
     const pathsToClose = new Set(targets);
-
-    setOpenTabPaths((current) => {
-      const activeIndex = activeFilePath ? current.indexOf(activeFilePath) : -1;
-      const next = current.filter((path) => !pathsToClose.has(path));
-
-      if (activeFilePath && pathsToClose.has(activeFilePath)) {
-        const fallback = next[activeIndex] ?? next[activeIndex - 1] ?? next.at(-1) ?? null;
-        setActiveFilePath(fallback);
-        setSelectedEntryPath(fallback);
-        setEditorLocation(null);
-      }
-
-      return next;
-    });
-
-    return true;
+    try {
+      return await runPathMutation((path) => pathsToClose.has(path), async () => {
+        const discarded = new Set<string>();
+        for (const path of targets) {
+          if (!await confirmTabClose(path)) return false;
+          if (contentsRef.current[path]?.content !== originalsRef.current[path]) discarded.add(path);
+        }
+        // Commit only after every confirmation; canceling a batch discards nothing.
+        for (const path of discarded) clearRecoverySnapshot(projectPath, path);
+        removeLoadedPaths((path) => discarded.has(path));
+        const activeIndex = activeFilePath ? openTabPaths.indexOf(activeFilePath) : -1;
+        const next = openTabPaths.filter((path) => !pathsToClose.has(path));
+        setOpenTabPaths(next);
+        if (activeFilePath && pathsToClose.has(activeFilePath)) {
+          const fallback = next[activeIndex] ?? next[activeIndex - 1] ?? next.at(-1) ?? null;
+          setActiveFilePath(fallback);
+          setSelectedEntryPath(fallback);
+          setEditorLocation(null);
+        }
+        return true;
+      });
+    } catch (error) {
+      reportError(error);
+      return false;
+    }
   }
 
   async function closeTab(path: string) {
@@ -521,7 +548,61 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     setError(error instanceof Error ? error.message : String(error));
   }
 
+  function cancelAutosave(path: string) {
+    const pending = autosaveTimers.current.get(path);
+    if (pending) window.clearTimeout(pending.timer);
+    autosaveTimers.current.delete(path);
+  }
+
+  function disposeModelsForPaths(matches: (path: string) => boolean) {
+    // @monaco-editor/react uses monaco.Uri.parse(path), confirmed in its model factory.
+    for (const path of Object.keys(contentsRef.current).filter(matches)) {
+      const model = monacoRef.current?.editor.getModel(monacoRef.current.Uri.parse(path));
+      if (model) obsoleteModels.current.add(model);
+    }
+  }
+
+  function removeLoadedPaths(matches: (path: string) => boolean) {
+    disposeModelsForPaths(matches);
+    contentsRef.current = Object.fromEntries(Object.entries(contentsRef.current).filter(([path]) => !matches(path)));
+    originalsRef.current = Object.fromEntries(Object.entries(originalsRef.current).filter(([path]) => !matches(path)));
+    setFileContents(contentsRef.current);
+    setOriginalContents(originalsRef.current);
+    setDirtyPaths((current) => new Set([...current].filter((path) => !matches(path))));
+  }
+
+  async function runPathMutation<T>(matches: (path: string) => boolean, operation: () => Promise<T>) {
+    if (mutationRef.current || leavingRef.current) throw new Error("Aguarde a operação atual terminar.");
+    mutationRef.current = true;
+    setIsMutating(true);
+    for (const path of autosaveTimers.current.keys()) if (matches(path)) cancelAutosave(path);
+    try { return await saveQueue.current.withPathsLocked(matches, operation); }
+    finally {
+      mutationRef.current = false;
+      setIsMutating(false);
+      scheduleDirtyAutosaves();
+    }
+  }
+
+  const saveFileRef = useRef(saveFile);
+  saveFileRef.current = saveFile;
+  function scheduleDirtyAutosaves() {
+    for (const [path, file] of Object.entries(contentsRef.current)) {
+      if (saveQueue.current.isBlocked(path)) continue;
+      if (file.content === originalsRef.current[path]) { cancelAutosave(path); continue; }
+      if (autosaveTimers.current.get(path)?.content === file.content) continue;
+      cancelAutosave(path);
+      const timer = window.setTimeout(() => {
+        autosaveTimers.current.delete(path);
+        void saveFileRef.current(path).catch(reportError);
+      }, 500);
+      autosaveTimers.current.set(path, { timer, content: file.content });
+    }
+  }
+
   async function saveFile(path: string) {
+    if (saveQueue.current.isBlocked(path)) return;
+    cancelAutosave(path);
     const content = contentsRef.current[path]?.content;
     if (content === undefined) return;
     setError(null);
@@ -532,7 +613,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       if (contentsRef.current[path]?.content === content) clearRecoverySnapshot(projectPath, path);
       setSaveState("saved");
     } catch (error) {
-      markDirty(path);
+      reconcileDirty(path);
       setSaveState("error");
       throw new Error(`Não foi possível salvar ${path}: ${error}`);
     }
@@ -551,7 +632,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }
 
   async function leaveWorkspace(action: () => void | Promise<void>) {
-    if (leavingRef.current) return;
+    if (leavingRef.current || mutationRef.current) return;
     leavingRef.current = true;
     setIsLeaving(true);
     try {
@@ -719,35 +800,15 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }, [activeFile, fileContents, projectPath]);
 
   useEffect(() => {
-    if (!activeFile || !activeContent) return;
-
-    const original = originalContents[activeFile.path];
-    if (original !== undefined && original === activeContent.content) {
-      setDirtyPaths((current) => {
-        if (!current.has(activeFile.path)) return current;
-        const next = new Set(current);
-        next.delete(activeFile.path);
-        return next;
-      });
-      return;
-    }
-
-    markDirty(activeFile.path);
-    setSaveState("saving");
-
-    const timer = window.setTimeout(() => {
-      void saveFile(activeFile.path).catch(reportError);
-    }, 500);
-
-    return () => window.clearTimeout(timer);
-  }, [activeFile, activeContent, originalContents, projectPath]);
+    scheduleDirtyAutosaves();
+  }, [fileContents, originalContents]);
 
   function updateActiveFile(value: string) {
-    if (!activeFile || leavingRef.current) return;
+    if (!activeFile || leavingRef.current || mutationRef.current) return;
 
-    markDirty(activeFile.path);
     saveRecoverySnapshot(projectPath, activeFile.path, value);
     contentsRef.current = { ...contentsRef.current, [activeFile.path]: { content: value, language: getLanguage(activeFile.name) } };
+    reconcileDirty(activeFile.path);
     setFileContents((current) => ({
       ...current,
       [activeFile.path]: {
@@ -832,112 +893,82 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
         setExpandedDirectories((current) => new Set(current).add(relativePath));
         setSelectedEntryPath(newPath);
       } else if (nameDialog.target) {
-        const oldPath = nameDialog.target.path;
-        const newPath = await renameProjectEntry(oldPath, name);
-
-        setFileContents((current) => {
-          const previousContent = current[oldPath];
-          if (!previousContent) return current;
-          const next = { ...current };
-          delete next[oldPath];
-          next[newPath] = previousContent;
-          return next;
+        const target = nameDialog.target;
+        const oldPath = target.path;
+        const directory = target.kind === "directory";
+        const matches = (path: string) => affectsProjectPath(path, oldPath, directory);
+        await runPathMutation(matches, async () => {
+          const newPath = await renameProjectEntry(oldPath, name);
+          if (newPath === oldPath) return;
+          const remap = (path: string) => remapProjectPath(path, oldPath, newPath, directory);
+          moveRecoverySnapshotsForPath(projectPath, oldPath, newPath, directory);
+          disposeModelsForPaths(matches);
+          contentsRef.current = Object.fromEntries(Object.entries(contentsRef.current).map(([path, content]) => [
+            remap(path), { ...content, language: getLanguage(remap(path).split(/[\\/]/).at(-1) ?? "") },
+          ]));
+          originalsRef.current = Object.fromEntries(Object.entries(originalsRef.current).map(([path, content]) => [remap(path), content]));
+          setFileContents(contentsRef.current);
+          setOriginalContents(originalsRef.current);
+          setDirtyPaths((current) => new Set([...current].map(remap)));
+          setOpenTabPaths((current) => current.map(remap));
+          setActiveFilePath((current) => current ? remap(current) : current);
+          setPendingActivePath((current) => current ? remap(current) : current);
+          setEditorLocation((current) => current ? { ...current, path: remap(current.path) } : current);
+          setSelectedEntryPath(newPath);
+          const relativePath = target.relativePath.split("/").slice(0, -1).concat(name.trim()).join("/");
+          setExpandedDirectories((current) => new Set([...current].map((path) =>
+            remapProjectPath(path, target.relativePath, relativePath, directory),
+          )));
+          setEntries((current) => current.map((entry) => matches(entry.path) ? {
+            ...entry, path: remap(entry.path),
+            name: entry.path === oldPath ? name.trim() : entry.name,
+            relativePath: remapProjectPath(entry.relativePath, target.relativePath, relativePath, directory),
+          } : entry));
         });
-
-        setOriginalContents((current) => {
-          if (!(oldPath in current)) return current;
-          const next = { ...current };
-          next[newPath] = next[oldPath];
-          delete next[oldPath];
-          return next;
-        });
-
-        setDirtyPaths((current) => {
-          if (!current.has(oldPath)) return current;
-          const next = new Set(current);
-          next.delete(oldPath);
-          next.add(newPath);
-          return next;
-        });
-
-        setOpenTabPaths((current) => current.map((path) => path === oldPath ? newPath : path));
-        setActiveFilePath((current) => current === oldPath ? newPath : current);
-        setEditorLocation((current) =>
-          current?.path === oldPath ? { ...current, path: newPath } : current,
-        );
-        setSelectedEntryPath(newPath);
+        setNameDialog(null);
+        return;
       }
 
       setNameDialog(null);
       setRefreshKey((current) => current + 1);
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : String(mutationError));
+      throw mutationError;
     }
   }
 
   async function handleDeleteSelected() {
-    if (!selectedEntry) return;
-
-    const confirmed = await confirm(
-      `Excluir ${selectedEntry.kind === "directory" ? "a pasta" : "o arquivo"} “${selectedEntry.name}”?${selectedEntry.kind === "directory" ? " Todo o conteúdo dentro dela também será excluído." : ""}`,
-      {
-        title: "Excluir item",
-        kind: "warning",
-        okLabel: "Excluir",
-        cancelLabel: "Cancelar",
-      },
-    );
-
-    if (!confirmed) return;
-
+    if (!selectedEntry || mutationRef.current || leavingRef.current) return;
+    const target = selectedEntry;
+    const directory = target.kind === "directory";
+    const matches = (path: string) => affectsProjectPath(path, target.path, directory);
     try {
-      await deleteProjectEntry(selectedEntry);
-      const deletedPath = selectedEntry.path;
-      const separator = deletedPath.includes("\\") ? "\\" : "/";
-      const affectsPath = (path: string) =>
-        path === deletedPath ||
-        (selectedEntry.kind === "directory" && path.startsWith(`${deletedPath}${separator}`));
-
-      const deletedTabs = openTabPaths.filter(affectsPath);
-      const nextTabs = openTabPaths.filter((path) => !affectsPath(path));
-
-      for (const path of deletedTabs) {
-        clearRecoverySnapshot(projectPath, path);
-      }
-
-      setOpenTabPaths(nextTabs);
-      setFileContents((current) => {
-        const next = { ...current };
-        for (const path of Object.keys(next)) {
-          if (affectsPath(path)) delete next[path];
+      await runPathMutation(matches, async () => {
+        const confirmed = await confirm(
+          `Excluir ${directory ? "a pasta" : "o arquivo"} “${target.name}”?${directory ? " Todo o conteúdo dentro dela também será excluído." : ""}`,
+          { title: "Excluir item", kind: "warning", okLabel: "Excluir", cancelLabel: "Cancelar" },
+        );
+        if (!confirmed) return;
+        await deleteProjectEntry(target);
+        clearRecoverySnapshotsForPath(projectPath, target.path, directory);
+        removeLoadedPaths(matches);
+        const nextTabs = openTabPaths.filter((path) => !matches(path));
+        setOpenTabPaths(nextTabs);
+        if (activeFilePath && matches(activeFilePath)) {
+          const fallback = nextTabs[0] ?? null;
+          setActiveFilePath(fallback);
         }
-        return next;
+        setEditorLocation((current) => current && matches(current.path) ? null : current);
+        setSelectedEntryPath((current) => current && matches(current) ? null : current);
+        setPendingActivePath((current) => current && matches(current) ? null : current);
+        setExpandedDirectories((current) => new Set([...current].filter((path) =>
+          !affectsProjectPath(path, target.relativePath, directory),
+        )));
+        setEntries((current) => current.filter((entry) => !matches(entry.path)));
+        setSaveState("saved");
+        setError(null);
       });
-      setOriginalContents((current) => {
-        const next = { ...current };
-        for (const path of Object.keys(next)) {
-          if (affectsPath(path)) delete next[path];
-        }
-        return next;
-      });
-      setDirtyPaths((current) => {
-        const next = new Set(current);
-        for (const path of deletedTabs) next.delete(path);
-        return next;
-      });
-
-      if (activeFilePath && affectsPath(activeFilePath)) {
-        const fallback = nextTabs[0] ?? null;
-        setActiveFilePath(fallback);
-        setSelectedEntryPath(fallback);
-      }
-
-      setEditorLocation((current) => current && affectsPath(current.path) ? null : current);
-      setSelectedEntryPath((current) => current === deletedPath ? null : current);
-      setRefreshKey((current) => current + 1);
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : String(deleteError));
-    }
+    } catch (error) { reportError(error); }
   }
 
   function showSidebar(mode: "explorer" | "search") {
@@ -1015,7 +1046,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
 
   useEffect(() => {
     function handleShortcut(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing || nameDialog || helpPage || isLeaving) return;
+      if (event.defaultPrevented || event.isComposing || nameDialog || helpPage || isLeaving || isMutating) return;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       let command: (() => unknown) | undefined;
@@ -1062,14 +1093,14 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
         </div>
       </header>
 
-      <div inert={isLeaving || !!nameDialog || !!helpPage}>
+      <div inert={isLeaving || isMutating || !!nameDialog || !!helpPage}>
         <WorkspaceMenuBar menus={menus} onError={reportError} />
       </div>
       {error && <div role="alert" className="workspace-error-banner">{error}
         <button type="button" aria-label="Dispensar erro" onClick={() => setError(null)}>×</button>
       </div>}
 
-      <section className="workspace-body" inert={isLeaving}>
+      <section className="workspace-body" inert={isLeaving || isMutating}>
         <aside className="workspace-sidebar" style={{ width: sidebarWidth, display: sidebarVisible ? undefined : "none" }}>
           {sidebarMode === "explorer" ? (
             <>
@@ -1244,7 +1275,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
                   onReady={onEditorReady}
                   wordWrap={wordWrap}
                   minimap={minimap}
-                  readOnly={isLeaving}
+                  readOnly={isLeaving || isMutating}
                   targetLocation={editorLocation?.path === activeFile.path ? editorLocation : undefined}
                 />
               </div>

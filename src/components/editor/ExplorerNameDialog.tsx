@@ -58,7 +58,7 @@ export function ExplorerNameDialog({ mode, initialName = "", onClose, onSubmit }
   }
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="dialog-backdrop" role="presentation" onMouseDown={() => { if (!isSubmitting) onClose(); }}>
       <section
         className="dialog-card"
         role="dialog"

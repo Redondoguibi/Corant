@@ -23,6 +23,7 @@ export function WorkspaceMenuBar({ menus, onError }: {
   const triggers = useRef<Array<HTMLButtonElement | null>>([]);
   const previousFocus = useRef<HTMLElement | null>(null);
   const [position, setPosition] = useState({ left: 8, top: 80 });
+  const openAtEnd = useRef(false);
   const items = openIndex === null ? [] : menus[openIndex].items;
 
   function close(restoreFocus = false) {
@@ -30,7 +31,8 @@ export function WorkspaceMenuBar({ menus, onError }: {
     if (restoreFocus && openIndex !== null) triggers.current[openIndex]?.focus();
   }
 
-  function open(index: number) {
+  function open(index: number, last = false) {
+    openAtEnd.current = last;
     if (openIndex === null) previousFocus.current = document.activeElement as HTMLElement;
     setFocusIndex(index);
     setOpenIndex(index);
@@ -46,7 +48,8 @@ export function WorkspaceMenuBar({ menus, onError }: {
       left: Math.max(8, Math.min(trigger.left, window.innerWidth - bounds.width - 8)),
       top: Math.max(8, Math.min(trigger.bottom, window.innerHeight - bounds.height - 8)),
     });
-    (popup.querySelector<HTMLButtonElement>("button:not(:disabled)") ?? popup).focus();
+    const enabled = popup.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+    (enabled[openAtEnd.current ? enabled.length - 1 : 0] ?? popup).focus();
   }, [openIndex]);
 
   useEffect(() => {
@@ -84,7 +87,7 @@ export function WorkspaceMenuBar({ menus, onError }: {
             onPointerEnter={() => { if (openIndex !== null && openIndex !== index) open(index); }}
             onKeyDown={(event) => {
               if (["ArrowDown", "ArrowUp"].includes(event.key)) {
-                event.preventDefault(); open(index);
+                event.preventDefault(); open(index, event.key === "ArrowUp");
               } else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
                 event.preventDefault();
                 const next = event.key === "Home" ? 0 : event.key === "End" ? menus.length - 1

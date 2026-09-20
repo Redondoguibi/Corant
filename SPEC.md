@@ -305,7 +305,7 @@ The first autosave implementation has been extended with local recovery snapshot
 
 Current initial behavior:
 
-- when the active file content changes, Corant waits roughly 500 ms
+- when a loaded file changes, Corant waits roughly 500 ms using an independent timer per path; tab switches do not cancel other files' timers
 - then writes the file through the filesystem service
 - UI exposes a saving/saved/error state
 
@@ -447,7 +447,13 @@ The top menubar uses dropdown menus with keyboard navigation, visible shortcuts,
 
 Edit also includes Monaco find/replace. Clipboard commands operate on the active editor and report access failures in the workspace.
 
-Manual saves and autosave share a per-file write queue. Save all includes modified loaded files even when their tabs are inactive/closed, and waits for queued writes. Recovery snapshots are only cleared when the completed write matches current content. Switching/closing projects and exiting the window offer save-and-continue or cancel for pending changes; failed saves keep the workspace open. The native close event uses the same guard as File > Exit.
+Manual saves and autosave share a per-file write queue. Save all includes modified loaded files even when their tabs are inactive, and waits for queued writes. Recovery snapshots are only cleared when the completed write matches current content. Dirty state is recalculated against the completed write even after undo or a tab switch. Switching/closing projects and exiting the window offer save-and-continue or cancel for pending changes; failed saves keep the workspace open. The native close event uses the same guard as File > Exit.
+
+Rename/delete lock the affected file or directory subtree, cancel its debounce timers and drain accepted writes before changing the filesystem. Locks remain held until React state and recovery mappings have been updated. Failed/canceled mutations release the lock and rearm dirty-file timers. Folder renames remap all descendant paths, contents, tabs, dirty state, navigation and recovery; deletes remove all affected dirty/cache entries and recovery snapshots, including closed/unloaded files. Obsolete Monaco models are disposed after the editor switches models; a renamed file starts a fresh undo history. Model URIs follow the wrapper's `monaco.Uri.parse(path)` convention.
+
+Closing dirty tabs drains already-started writes before offering **Discard and close** or cancel. Discard removes only unsaved changes, along with the cache, recovery and Monaco model. Batch closing commits discards only after every confirmation, so canceling preserves all remaining unsaved work. Already-completed disk writes are not reverted by discarding.
+
+ArrowUp opens the last enabled menu item; ArrowDown opens the first. Clipboard behavior remains the existing implementation pending a dedicated native pass, and broader Workspace extraction is deferred to later work.
 
 Implemented shortcuts: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Shift+S, Ctrl+W, Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+Shift+E, Ctrl+Shift+F, Ctrl+B, Alt+Z and F1. Editor-native shortcuts continue to use Monaco. User-customizable bindings remain planned.
 

@@ -90,6 +90,7 @@ O Corant agora mantém snapshots de recuperação locais enquanto o usuário edi
 Inclui atualmente:
 
 - autosave após aproximadamente 500 ms de inatividade;
+- timers independentes por arquivo, mantendo o autosave ao trocar de aba;
 - snapshot de recuperação local durante a edição;
 - recuperação de conteúdo após encerramento inesperado/crash;
 - comparação entre snapshot recuperável e arquivo salvo no disco;
@@ -136,6 +137,10 @@ Inclui:
 - `Executar` e `Terminal`: menus com indicações desabilitadas de indisponibilidade; a execução e o terminal integrado continuam reservados à Parte 6.
 
 Salvar tudo inclui arquivos carregados com alterações, mesmo em abas inativas. As gravações são serializadas por arquivo para evitar conflitos entre autosave e salvamento manual. Abrir/fechar projeto e sair (inclusive pelo botão da janela) oferecem salvar alterações pendentes ou cancelar; uma falha de salvamento mantém o workspace aberto. Cada arquivo mantém seu próprio histórico de desfazer durante a sessão do projeto.
+
+Renomear e excluir bloqueiam novas gravações nos caminhos afetados e aguardam as já iniciadas, inclusive para pastas. Renomear migra conteúdos, abas e recovery dos descendentes; excluir limpa também snapshots de arquivos fechados ou ainda não abertos. Models antigos do Monaco são descartados nessas operações, para não reutilizar conteúdo ou histórico ao recriar um caminho. O histórico de desfazer recomeça após renomear.
+
+Ao fechar uma aba ainda modificada, a confirmação **Descartar e fechar** remove alterações não salvas, cache, recovery e histórico daquela aba; cancelar preserva o trabalho. Gravações já iniciadas são aguardadas antes da confirmação, mantendo a versão efetivamente salva no disco.
 
 Atalhos principais: `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab`/`Ctrl+Shift+Tab`, `Ctrl+Shift+E`, `Ctrl+Shift+F`, `Ctrl+B`, `Alt+Z` e `F1`.
 
