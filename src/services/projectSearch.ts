@@ -70,6 +70,7 @@ const MAX_NAME_RESULTS = 120;
 const MAX_CONTENT_RESULTS = 500;
 const MAX_RESULTS_PER_FILE = 100;
 const YIELD_EVERY_FILES = 12;
+const YIELD_EVERY_LINES = 2000;
 
 function normalizeQuery(query: string) {
   return query.trim().toLocaleLowerCase();
@@ -151,6 +152,7 @@ export async function searchProjectContents(
   const matches: ProjectSearchContentMatch[] = [];
   let searchedFiles = 0;
   let skippedFiles = files.length - searchableFiles.length;
+  let truncated = false;
 
   for (let fileIndex = 0; fileIndex < searchableFiles.length; fileIndex += 1) {
     if (isCancelled()) {
@@ -198,7 +200,21 @@ export async function searchProjectContents(
       }
 
       if (matchesInFile >= MAX_RESULTS_PER_FILE) {
+        truncated = true;
         break;
+      }
+
+      if ((lineIndex + 1) % YIELD_EVERY_LINES === 0) {
+        if (isCancelled()) {
+          return {
+            matches,
+            searchedFiles,
+            skippedFiles,
+            truncated,
+          };
+        }
+
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
     }
 
@@ -211,6 +227,6 @@ export async function searchProjectContents(
     matches,
     searchedFiles,
     skippedFiles,
-    truncated: false,
+    truncated,
   };
 }
