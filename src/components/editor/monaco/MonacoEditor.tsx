@@ -73,6 +73,7 @@ export function MonacoEditor({
       options={
         {
           automaticLayout: true,
+          contextmenu: true,
           minimap: { enabled: true },
           fontSize: 14,
           lineHeight: 22,
