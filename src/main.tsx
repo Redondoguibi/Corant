@@ -4,6 +4,7 @@ import { App } from "./app/App";
 import "./styles/index.css";
 import "./styles/tabs.css";
 import "./styles/search.css";
+import "./styles/context-menu.css";
 
 const rootElement = document.getElementById("app");
 
