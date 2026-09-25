@@ -440,7 +440,7 @@ The top menubar uses dropdown menus with keyboard navigation, visible shortcuts,
 - disabled unavailable indication until execution is supported
 
 **Terminal**
-- disabled unavailable indication; integrated terminal remains Part 6
+- opens or hides the integrated terminal panel; one session remains active when hidden
 
 **Ajuda**
 - local usage/shortcut guide and about/version dialog
@@ -477,7 +477,7 @@ The terminal should:
 - work with the active project path
 - coexist with the Explorer/editor rather than launching an external terminal for normal use
 
-The exact terminal implementation/PTY strategy is still to be designed.
+The Windows implementation uses ConPTY with a job object for process-tree cleanup, Tauri channels for output, and xterm.js in a resizable workspace panel.
 
 Because this is a native desktop capability, it belongs primarily on the Tauri/Rust side, with the React UI providing the terminal interface.
 
@@ -505,6 +505,12 @@ The plugin system should define:
 - versioning/compatibility
 
 ### Security philosophy
+
+**Current API foundation:** `src/plugins/api.ts` defines API version 1 for explicitly registered, trusted built-in modules. `PluginHost` validates manifests (namespaced IDs, stable `major.minor.patch` versions, API version and declared commands), checks host grants independently of requested permissions, and revokes contexts, commands and subscriptions on deactivation, activation failure or workspace disposal. Asynchronous lifecycle hooks have a time limit and receive cooperative cancellation through the context's `AbortSignal`.
+
+The API currently provides project metadata (`workspace.read`), active-document snapshots and change events (`editor.read`), version-checked replacement through Monaco (`editor.write`), declared command registration (`commands.register`), and project/plugin-scoped JSON preferences (`settings.read`/`settings.write`). Commands appear in the existing Run menu. Settings are limited to 64 KiB per value and must not store secrets. Built-in registration is explicit in `src/plugins/builtins.ts`; no built-in product plugins are shipped yet.
+
+These modules share the application's JavaScript environment. Permission checks govern calls through the API and are not an isolation boundary for arbitrary code. External plugin loading/installing, a sandbox, secret storage, filesystem/terminal capabilities and additional UI contributions remain planned. Tauri capabilities are unchanged by this API foundation.
 
 Plugins should not automatically receive unlimited native/system access.
 
@@ -1016,18 +1022,19 @@ This is the agreed initial implementation order.
 **Status: implemented in the current repository.**
 
 - dropdown File/Edit/Selection/View/Help menus, shortcuts and safe save/leave actions
-- Run/Terminal display unavailable states pending Part 6
+- Run lists registered built-in plugin commands, with an unavailable state when none exist; Terminal opens the integrated panel
 
 ### Part 6 — Integrated terminal
 
-**Status: planned.**
+**Status: implemented in the current repository.**
 
 - one terminal instance
 - current project as working directory
+- input, continuous output, resize, restart and process-tree cleanup
 
 ### Part 7 — Plugin system
 
-**Status: planned after core stability.**
+**Status: API v1 foundation implemented for trusted built-in modules; external plugin system and product plugins remain planned.**
 
 - API
 - lifecycle
@@ -1182,8 +1189,8 @@ This list is a working map rather than a guarantee that no other files matter.
 | Dirty-tab protection | Current |
 | Global filename search | Current |
 | Project content search | Current |
-| Functional menus | Current; Run/Terminal actions pending Part 6 |
-| Integrated terminal | Planned |
+| Functional menus | Current; Run exposes registered plugin commands; task runner planned |
+| Integrated terminal | Current (Windows) |
 | Image editor | Planned |
 | Import/export archives | Planned |
 | Drag-and-drop import | Planned |
@@ -1191,7 +1198,7 @@ This list is a working map rather than a guarantee that no other files matter.
 | Workspace settings | Planned |
 | History/versioning | Planned |
 | Custom shortcuts | Planned |
-| Plugin framework | Planned |
+| Plugin framework | API v1 foundation current for trusted built-ins; external plugins planned |
 | Copilot plugin | Planned |
 | Good Vibes plugin | Planned |
 | Commands plugin | Planned |

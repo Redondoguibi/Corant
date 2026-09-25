@@ -134,7 +134,7 @@ Inclui:
 - `Seleção`: selecionar linha, expandir/reduzir seleção e selecionar ocorrências;
 - `Exibir`: Explorer, busca global, barra lateral, minimapa, quebra de linha, navegação entre abas e atualização do Explorer;
 - `Ajuda`: guia local de uso/atalhos e informações da versão;
-- `Executar` e `Terminal`: menus com indicações desabilitadas de indisponibilidade; a execução e o terminal integrado continuam reservados à Parte 6.
+- `Terminal`: abre o terminal integrado; `Executar` lista comandos registrados por plugins internos quando disponíveis. O executor de tarefas continua planejado.
 
 Salvar tudo inclui arquivos carregados com alterações, mesmo em abas inativas. As gravações são serializadas por arquivo para evitar conflitos entre autosave e salvamento manual. Abrir/fechar projeto e sair (inclusive pelo botão da janela) oferecem salvar alterações pendentes ou cancelar; uma falha de salvamento mantém o workspace aberto. Cada arquivo mantém seu próprio histórico de desfazer durante a sessão do projeto.
 
@@ -146,17 +146,19 @@ Atalhos principais: `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctr
 
 A interface dos menus está em [`WorkspaceMenuBar.tsx`](src/components/editor/WorkspaceMenuBar.tsx), integrada ao [`Workspace.tsx`](src/components/editor/Workspace.tsx).
 
-### ⏳ Parte 6 — Terminal integrado
+### ✅ Parte 6 — Terminal integrado
 
-A visão do produto utiliza **uma única instância de terminal por vez**, iniciada no diretório do projeto atual.
+O workspace utiliza **uma única sessão de terminal por vez**, iniciada no diretório do projeto atual. O painel integrado usa xterm.js e pode ser ocultado sem interromper o shell; oferece reinício, encerramento e redimensionamento.
 
-A implementação deverá integrar React e Tauri/Rust para fornecer um terminal nativo dentro do workspace.
+O backend Tauri/Rust usa ConPTY no Windows e encerra a árvore de processos ao fechar ou trocar o projeto.
 
 ### ⏳ Parte 7 — Sistema de plugins
 
-O sistema de plugins será projetado somente depois de a base estar estável.
+A base da API v1 para plugins internos está implementada em [`src/plugins/api.ts`](src/plugins/api.ts) e [`src/plugins/host.ts`](src/plugins/host.ts). Inclui manifesto versionado, permissões declaradas e concedidas separadamente, ativação/desativação com cancelamento, comandos no menu Executar, acesso ao documento ativo e configurações locais por projeto/plugin. Edições preservam desfazer, autosave e recuperação, e rejeitam documentos ou versões antigos.
 
-A arquitetura deverá definir:
+O catálogo explícito em [`src/plugins/builtins.ts`](src/plugins/builtins.ts) está vazio até a implementação dos plugins nativos. Essa API executa módulos internos confiáveis; não é um sandbox para código externo. Instalação/remoção, isolamento de plugins externos, integrações adicionais de UI e capacidades nativas continuam planejados. Configurações armazenam preferências, não chaves de API ou outros segredos.
+
+O sistema completo contempla:
 
 - API de plugins;
 - ciclo de vida;

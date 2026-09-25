@@ -1,8 +1,10 @@
 use std::path::Path;
+use tauri::Manager;
 use tauri_plugin_fs::FsExt;
+mod terminal;
 
 #[tauri::command]
-fn allow_project_directory(app: tauri::AppHandle, path: String) -> Result<String, String> {
+async fn allow_project_directory(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let directory = Path::new(&path);
 
     if !directory.exists() {
@@ -21,11 +23,11 @@ fn allow_project_directory(app: tauri::AppHandle, path: String) -> Result<String
         .allow_directory(&canonical, true)
         .map_err(|error| format!("Não foi possível liberar a pasta: {error}"))?;
 
-    Ok(canonical.to_string_lossy().into_owned())
+    activate_project(app, canonical).await
 }
 
 #[tauri::command]
-fn create_project_directory(
+async fn create_project_directory(
     app: tauri::AppHandle,
     parent_path: String,
     project_name: String,
@@ -72,12 +74,26 @@ fn create_project_directory(
         .allow_directory(&canonical, true)
         .map_err(|error| format!("Não foi possível liberar o projeto: {error}"))?;
 
-    Ok(canonical.to_string_lossy().into_owned())
+    activate_project(app, canonical).await
+}
+
+async fn activate_project(
+    app: tauri::AppHandle,
+    canonical: std::path::PathBuf,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<terminal::TerminalManager>()
+            .activate_project(canonical.clone())?;
+        Ok(canonical.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("Falha ao ativar projeto: {e}"))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(terminal::TerminalManager::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -92,8 +108,21 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             allow_project_directory,
-            create_project_directory
+            create_project_directory,
+            terminal::terminal_start,
+            terminal::terminal_input,
+            terminal::terminal_resize,
+            terminal::terminal_stop
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // CloseRequested may be cancelled by the unsaved-file dialog. Only tear
+            // down here once the main window is actually destroyed or the app exits.
+            if matches!(&event, tauri::RunEvent::Exit)
+                || matches!(&event, tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } if label == "main")
+            {
+                app.state::<terminal::TerminalManager>().shutdown();
+            }
+        });
 }

@@ -27,7 +27,7 @@ export function WorkspaceHelpDialog({ page, onClose }: {
         <p>Editar e Seleção atuam no arquivo aberto. Exibir alterna o Explorer, a busca global, o minimapa e a quebra de linha.</p>
         <p>Atalhos: Ctrl+N cria um arquivo; Ctrl+O abre um projeto; Ctrl+S salva; Ctrl+Shift+S salva tudo;
           Ctrl+W fecha a aba; Ctrl+Tab troca de aba; Ctrl+Shift+F abre a busca; Ctrl+B alterna a barra lateral; F1 abre esta ajuda.</p>
-        <p>O terminal integrado e a execução de comandos estarão disponíveis em uma próxima etapa.</p>
+        <p>Ctrl+` abre o terminal integrado na pasta do projeto. O painel pode ser ocultado sem interromper o shell; use Encerrar para pará-lo ou Reiniciar para abrir uma nova sessão. A execução automatizada de tarefas ainda não está disponível.</p>
       </>}
       <div className="dialog-actions"><button type="button" className="primary-button" onClick={onClose}>Entendi</button></div>
     </dialog>

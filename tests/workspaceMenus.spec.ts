@@ -17,7 +17,7 @@ test("menus navigate by keyboard, dismiss, disable unavailable actions and toggl
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(page.getByRole("menubar").getByRole("menuitem", { name: "Editar", exact: true })).toBeFocused();
   await openMenu(page, "Terminal");
-  await expect(page.getByRole("menuitem", { name: "Terminal integrado em breve" })).toBeDisabled();
+  await expect(page.getByRole("menuitemcheckbox", { name: "Mostrar terminal" })).toBeEnabled();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("menu", { name: "Ajuda" })).toBeVisible();
   await page.locator(".workspace-project-name").click();

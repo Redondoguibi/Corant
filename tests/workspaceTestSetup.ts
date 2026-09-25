@@ -18,6 +18,9 @@ export async function setupWorkspace(page: Page) {
       directories: [] as string[], holdWrites: false,
       pendingWrites: [] as Array<{ path: string; release: () => void }>,
       mutations: [] as string[], dialogs: [] as string[], failMutation: false,
+      terminalStarts: 0, terminalStops: [] as string[], terminalInputs: [] as number[][],
+      terminalResizes: [] as Array<{ cols: number; rows: number }>,
+      terminalChannels: [] as Array<{ onmessage: (event: unknown) => void }>,
     };
     (window as any).testState = state;
     (window as any).isTauri = true;
@@ -29,6 +32,14 @@ export async function setupWorkspace(page: Page) {
         return state.confirmed ? args.buttons.OkCancelCustom[0] : args.buttons.OkCancelCustom[1];
       }
       if (command === "allow_project_directory") return args.path;
+      if (command === "terminal_start") {
+        state.terminalStarts += 1;
+        state.terminalChannels.push(args.onEvent);
+        return String(state.terminalStarts);
+      }
+      if (command === "terminal_stop") { state.terminalStops.push(args.sessionId); return; }
+      if (command === "terminal_input") { state.terminalInputs.push(args.data); return; }
+      if (command === "terminal_resize") { state.terminalResizes.push({ cols: args.cols, rows: args.rows }); return; }
       if (command === "plugin:fs|read_dir") {
         const children = new Map<string, boolean>();
         for (const file of [...Object.keys(state.files), ...state.directories]) {

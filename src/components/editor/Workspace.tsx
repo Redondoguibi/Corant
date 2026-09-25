@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { editor } from "monaco-editor";
 import type { Monaco } from "@monaco-editor/react";
@@ -12,6 +12,8 @@ import { WorkspaceMenuBar, type WorkspaceMenu, type WorkspaceMenuItem } from "./
 import { WorkspaceHelpDialog } from "./WorkspaceHelpDialog";
 import { createFileSaveQueue } from "../../services/fileSaveQueue";
 import { runEditorCommand } from "../../services/editorCommands";
+import { WorkspaceTerminal } from "../../services/workspaceTerminal";
+import { useWorkspacePlugins } from "../../plugins/useWorkspacePlugins";
 import { affectsProjectPath, remapProjectPath } from "../../services/projectPaths";
 import "../../styles/menus.css";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
@@ -39,6 +41,8 @@ type WorkspaceProps = {
   onBackToHome: () => void;
   onOpenProject: () => Promise<void>;
 };
+
+const TerminalPanel = lazy(() => import("./TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 
 type FileContent = {
   content: string;
@@ -189,6 +193,15 @@ function disposeObsoleteModel(model: editor.ITextModel) {
 }
 
 export function Workspace({ projectName, projectPath, onBackToHome, onOpenProject }: WorkspaceProps) {
+  const terminalRef = useRef<WorkspaceTerminal | null>(null);
+  useEffect(() => {
+    const terminal = new WorkspaceTerminal(projectPath);
+    terminalRef.current = terminal;
+    return () => {
+      terminalRef.current = null;
+      void terminal.dispose().catch((error) => console.error("Falha ao encerrar terminal:", error));
+    };
+  }, [projectPath]);
   const [entries, setEntries] = useState<ProjectFile[]>([]);
   const [openTabPaths, setOpenTabPaths] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
@@ -212,6 +225,8 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const [helpPage, setHelpPage] = useState<"about" | "help" | null>(null);
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [terminalOpened, setTerminalOpened] = useState(false);
   const leavingRef = useRef(false);
   const [isMutating, setIsMutating] = useState(false);
   const mutationRef = useRef(false);
@@ -280,6 +295,12 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   );
 
   const activeContent = activeFile ? fileContents[activeFile.path] : null;
+  const plugins = useWorkspacePlugins({ name: projectName, path: projectPath }, {
+    instance: editorInstance,
+    path: activeContent ? activeFilePath : null,
+    modelUri: activeContent && activeFilePath && monacoRef.current ? monacoRef.current.Uri.parse(activeFilePath).toString() : null,
+    isReadOnly: () => leavingRef.current || mutationRef.current,
+  }, reportError);
 
   function reconcileDirty(path: string, savedContent = originalsRef.current[path]) {
     setDirtyPaths((current) => {
@@ -648,8 +669,16 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     finally { leavingRef.current = false; setIsLeaving(false); }
   }
 
-  const closeAllDirtyTabsAndLeave = () => leaveWorkspace(onBackToHome);
-  const exitWorkspace = () => leaveWorkspace(() => getCurrentWindow().destroy());
+  const closeAllDirtyTabsAndLeave = () => leaveWorkspace(async () => {
+    await terminalRef.current?.stop();
+    await plugins.dispose();
+    onBackToHome();
+  });
+  const exitWorkspace = () => leaveWorkspace(async () => {
+    await terminalRef.current?.stop();
+    await plugins.dispose();
+    await getCurrentWindow().destroy();
+  });
   const exitRef = useRef(exitWorkspace);
   exitRef.current = exitWorkspace;
   useEffect(() => {
@@ -979,6 +1008,11 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     });
   }
 
+  function toggleTerminal() {
+    if (!terminalVisible) setTerminalOpened(true);
+    setTerminalVisible((current) => !current);
+  }
+
   function switchTab(direction: 1 | -1) {
     const index = openTabPaths.indexOf(activeFilePath ?? "");
     const path = openTabPaths[(index + direction + openTabPaths.length) % openTabPaths.length];
@@ -1032,11 +1066,14 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       { id: "previous-tab", label: "Aba anterior", shortcut: "Ctrl+Shift+Tab", disabled: openTabs.length < 2, onSelect: () => switchTab(-1) },
       { id: "refresh", label: "Atualizar Explorer", onSelect: () => setRefreshKey((value) => value + 1) },
     ] },
-    { label: "Executar", items: [
+    { label: "Executar", items: plugins.commands.length ? plugins.commands.map((command) => ({
+      id: command.id, label: command.title, disabled: isLeaving || isMutating,
+      onSelect: () => plugins.executeCommand(command.id),
+    })) : [
       { id: "run-unavailable", label: "Execução ainda não disponível", disabled: true, onSelect: () => undefined },
     ] },
     { label: "Terminal", items: [
-      { id: "terminal-unavailable", label: "Terminal integrado em breve", disabled: true, onSelect: () => undefined },
+      { id: "toggle-terminal", label: terminalVisible ? "Ocultar terminal" : "Mostrar terminal", shortcut: "Ctrl+`", checked: terminalVisible, disabled: !isTauri(), onSelect: toggleTerminal },
     ] },
     { label: "Ajuda", items: [
       { id: "help", label: "Guia e atalhos", shortcut: "F1", onSelect: () => setHelpPage("help") },
@@ -1049,6 +1086,11 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       if (event.defaultPrevented || event.isComposing || nameDialog || helpPage || isLeaving || isMutating) return;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
+      if (isTauri() && mod && !event.shiftKey && !event.altKey && key === "`") {
+        event.preventDefault(); event.stopPropagation(); toggleTerminal(); return;
+      }
+      // Let the shell receive its own control keys when terminal input is focused.
+      if ((event.target as HTMLElement).closest(".terminal-host")) return;
       let command: (() => unknown) | undefined;
       if (mod && !event.altKey) {
         if (key === "s") command = event.shiftKey ? saveAll : () => activeFile && saveFile(activeFile.path);
@@ -1280,18 +1322,6 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
                 />
               </div>
 
-              <footer className="workspace-statusbar">
-                <div className="status-left">
-                  <span>Local</span>
-                  <span>✓</span>
-                  <span>{dirtyPaths.has(activeFile.path) ? "Alterações pendentes" : "0 erros"}</span>
-                </div>
-                <div className="status-right">
-                  <span>Spaces: 2</span>
-                  <span>UTF-8</span>
-                  <span>{activeContent.language}</span>
-                </div>
-              </footer>
             </>
           ) : (
             <div className="editor-empty-state">
@@ -1300,6 +1330,25 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
                 {error ?? "Abra um arquivo pelo Explorer para começar a editar."}
               </span>
             </div>
+          )}
+          {terminalOpened && terminalRef.current && (
+            <Suspense fallback={<div className="terminal-loading">Abrindo terminal…</div>}>
+              <TerminalPanel terminal={terminalRef.current} visible={terminalVisible} onHide={() => setTerminalVisible(false)} />
+            </Suspense>
+          )}
+          {activeFile && activeContent && (
+            <footer className="workspace-statusbar">
+              <div className="status-left">
+                <span>Local</span>
+                <span>✓</span>
+                <span>{dirtyPaths.has(activeFile.path) ? "Alterações pendentes" : "0 erros"}</span>
+              </div>
+              <div className="status-right">
+                <span>Spaces: 2</span>
+                <span>UTF-8</span>
+                <span>{activeContent.language}</span>
+              </div>
+            </footer>
           )}
         </section>
       </section>
