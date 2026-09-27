@@ -508,9 +508,9 @@ The plugin system should define:
 
 **Current API foundation:** `src/plugins/api.ts` defines API version 1 for explicitly registered, trusted built-in modules. `PluginHost` validates manifests (namespaced IDs, stable `major.minor.patch` versions, API version and declared commands), checks host grants independently of requested permissions, and revokes contexts, commands and subscriptions on deactivation, activation failure or workspace disposal. Asynchronous lifecycle hooks have a time limit and receive cooperative cancellation through the context's `AbortSignal`.
 
-The API currently provides project metadata (`workspace.read`), active-document snapshots and change events (`editor.read`), version-checked replacement through Monaco (`editor.write`), declared command registration (`commands.register`), and project/plugin-scoped JSON preferences (`settings.read`/`settings.write`). Commands appear in the existing Run menu. Settings are limited to 64 KiB per value and must not store secrets. Built-in registration is explicit in `src/plugins/builtins.ts`; no built-in product plugins are shipped yet.
+The API currently provides project metadata (`workspace.read`), active-document snapshots and change events (`editor.read`), version-checked replacement through Monaco (`editor.write`), declared command registration (`commands.register`), and project/plugin-scoped JSON preferences (`settings.read`/`settings.write`). Commands appear in the existing Run menu. Settings are limited to 64 KiB per value and must not store secrets. Built-in registration is explicit in `src/plugins/builtins.ts`; Copilot, Good Vibes and Commands are registered built-ins. Panel registration, themes, bounded project text reads/create-new exports and cancellable AI requests have explicit API permissions.
 
-These modules share the application's JavaScript environment. Permission checks govern calls through the API and are not an isolation boundary for arbitrary code. External plugin loading/installing, a sandbox, secret storage, filesystem/terminal capabilities and additional UI contributions remain planned. Tauri capabilities are unchanged by this API foundation.
+These modules share the application's JavaScript environment. Permission checks govern calls through the API and are not an isolation boundary for arbitrary code. External plugin loading/installing, a sandbox, secret storage, terminal capabilities and arbitrary UI contributions remain planned. Tauri capabilities are unchanged by this API foundation.
 
 Plugins should not automatically receive unlimited native/system access.
 
@@ -522,7 +522,7 @@ This is especially important because Corant is a native desktop application with
 
 Git integration is intentionally considered a community-plugin responsibility rather than something Corant must make a core native feature from the beginning.
 
-### Native plugins planned
+### Native plugins implemented
 
 #### Copilot
 
@@ -1199,9 +1199,9 @@ This list is a working map rather than a guarantee that no other files matter.
 | History/versioning | Planned |
 | Custom shortcuts | Planned |
 | Plugin framework | API v1 foundation current for trusted built-ins; external plugins planned |
-| Copilot plugin | Planned |
-| Good Vibes plugin | Planned |
-| Commands plugin | Planned |
+| Copilot plugin | Current: OpenRouter and Windows Codex CLI with explicit isolated login |
+| Good Vibes plugin | Current: Crimson, Dawn and Midnight themes |
+| Commands plugin | Current: saved export recipes with preview and create-new output |
 | Git integration | Community plugin direction |
 
 ---

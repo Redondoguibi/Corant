@@ -1,3 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
+import { requestAi, codexAccount, codexModels } from "./nativeServices";
+import type { PluginFile, PluginPanel, ThemeId } from "./api";
 import { useEffect, useRef, useState } from "react";
 import type { EditorDocument, PluginCommand, ProjectInfo } from "./api";
 import { builtinPlugins } from "./builtins";
@@ -7,9 +10,13 @@ import { createPluginSettings } from "./settings";
 
 let previousWorkspaceCleanup: Promise<void> = Promise.resolve();
 
-export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEditorState, report: (error: unknown) => void) {
-  const latest = useRef({ project, editorState, report });
-  latest.current = { project, editorState, report };
+export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEditorState, report: (error: unknown) => void, files: { list(): readonly PluginFile[]; content(path: string): string | undefined; refresh(): void }) {
+  const latest = useRef({ project, editorState, report, files });
+  latest.current = { project, editorState, report, files };
+  const [generation, setGeneration] = useState(0);
+  const [theme, setTheme] = useState<ThemeId>("crimson");
+  const [panels, setPanels] = useState<Record<string, PluginPanel>>({});
+  const [activePanelId, setActivePanelId] = useState<string | null>(null);
   const hostRef = useRef<PluginHost | null>(null);
   const listeners = useRef(new Set<(document: EditorDocument | null) => void>());
   const [commands, setCommands] = useState<readonly PluginCommand[]>([]);
@@ -28,7 +35,25 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
       getItem: (key) => window.localStorage.getItem(key),
       setItem: (key, value) => window.localStorage.setItem(key, value),
       removeItem: (key) => window.localStorage.removeItem(key),
-    }), (error, id) => { if (!disposed) latest.current.report(new Error(`Plugin ${id}: ${error.message}`, { cause: error })); });
+    }), (error, id) => { if (!disposed) latest.current.report(new Error(`Plugin ${id}: ${error.message}`, { cause: error })); }, 5000, {
+      registerPanel: (id, panel) => { setPanels((current) => ({ ...current, [id]: panel })); return { dispose: () => { setPanels((current) => { const next = { ...current }; delete next[id]; return next; }); setActivePanelId((current) => current === id ? null : current); } }; },
+      openPanel: setActivePanelId, setTheme,
+      listFiles: () => latest.current.files.list(),
+      readText: async (path) => {
+        const disk = await invoke<string>("plugin_read_text", { projectPath: project.path, path });
+        const text = latest.current.files.content(path) ?? disk;
+        if (new TextEncoder().encode(text).length > 1024 * 1024) throw new Error("Arquivo excede 1 MiB.");
+        return text;
+      },
+      exportText: async (name, text) => {
+        if (latest.current.editorState.isReadOnly()) throw new Error("Workspace ocupado.");
+        await invoke("plugin_export_text", { projectPath: project.path, name, text });
+        if (!disposed) latest.current.files.refresh();
+      },
+      codexModels: (signal) => codexModels(project.path, signal),
+      requestAi: (request, signal) => requestAi(project.path, request, signal),
+      codexAccount: (action, signal, output) => codexAccount(project.path, action, signal, output),
+    });
     hostRef.current = host;
     const subscription = host.onDidChangeCommands(() => { if (!disposed) setCommands(host.listCommands()); });
     setCommands([]);
@@ -45,7 +70,7 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
       // Revoke immediately and finish deactivation before activating the next workspace.
       previousWorkspaceCleanup = Promise.all([previousWorkspaceCleanup, host.dispose()]).then(() => {});
     };
-  }, [project.path, bridge]);
+  }, [project.path, bridge, generation]);
 
   useEffect(() => {
     let disposed = false;
@@ -67,7 +92,9 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
   }, [bridge, editorState.instance, editorState.path, editorState.modelUri]);
 
   return {
-    commands,
+    commands, theme, activePanel: activePanelId ? panels[activePanelId] : null, activePanelId,
+    closePanel: () => setActivePanelId(null),
+    restart: () => setGeneration((value) => value + 1),
     executeCommand: (id: string) => hostRef.current?.executeCommand(id),
     dispose: () => hostRef.current?.dispose(),
   };

@@ -192,6 +192,7 @@ impl Native {
         output: Output,
         input: Receiver<Vec<u8>>,
         stop: Arc<AtomicBool>,
+        environment: Option<&[u16]>,
     ) -> Result<Self, String> {
         dimensions(cols, rows)?;
         let project = shell_directory(project);
@@ -339,7 +340,7 @@ impl Native {
                 null(),
                 0,
                 EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED,
-                null(),
+                environment.map_or(null(), |block| block.as_ptr().cast()),
                 cwd.as_ptr(),
                 &startup.StartupInfo,
                 &mut process,
@@ -473,7 +474,7 @@ impl Drop for Native {
     }
 }
 
-pub(super) struct Session {
+pub(crate) struct Session {
     stop: Arc<AtomicBool>,
     input: SyncSender<Vec<u8>>,
     resize: SyncSender<Resize>,
@@ -501,6 +502,19 @@ impl Session {
         output: Output,
         exit: Exit,
     ) -> Result<Self, String> {
+        Self::with_environment(project, cols, rows, shell, arguments, output, exit, None)
+    }
+
+    pub(crate) fn with_environment(
+        project: &Path,
+        cols: u16,
+        rows: u16,
+        shell: &Path,
+        arguments: &str,
+        output: Output,
+        exit: Exit,
+        environment: Option<&[u16]>,
+    ) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
         let (input, input_rx) = mpsc::sync_channel(64);
         let (resize, resize_rx) = mpsc::sync_channel::<Resize>(16);
@@ -513,6 +527,7 @@ impl Session {
             output,
             input_rx,
             Arc::clone(&stop),
+            environment,
         )?;
         let worker = thread::Builder::new()
             .name("terminal-session".into())
@@ -597,7 +612,7 @@ impl Session {
             .map_err(|_| "O terminal não respondeu ao redimensionamento.".to_string())?
     }
 
-    pub(super) fn stop(&mut self) -> Result<(), String> {
+    pub(crate) fn stop(&mut self) -> Result<(), String> {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(worker) = self.worker.take() {
             worker

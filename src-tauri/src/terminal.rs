@@ -9,7 +9,7 @@ use std::{
 use tauri::{ipc::Channel, Manager};
 
 #[cfg(windows)]
-mod windows;
+pub(crate) mod windows;
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]

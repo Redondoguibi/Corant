@@ -2,7 +2,7 @@ import {
   PLUGIN_API_VERSION, PLUGIN_PERMISSIONS, PluginApiError,
   type CommandHandler, type Disposable, type DocumentReplacement, type EditorDocument,
   type JsonValue, type PluginCommand, type PluginContext, type PluginDefinition,
-  type PluginManifest, type PluginPermission, type ProjectInfo,
+  type PluginManifest, type PluginPermission, type ProjectInfo, type PluginPanel, type ThemeId, type PluginFile, type AiRequest, type AiModel,
 } from "./api";
 import { copyJson, type PluginSettingsStore } from "./settings";
 
@@ -11,6 +11,17 @@ export interface PluginWorkspaceServices {
   getActiveDocument(): EditorDocument | null;
   replaceActiveDocument(change: DocumentReplacement): void;
   onDidChangeActiveDocument(listener: (document: EditorDocument | null) => void): Disposable;
+}
+export interface PluginIntegrations {
+  registerPanel(id: string, panel: PluginPanel): Disposable;
+  openPanel(id: string): void;
+  setTheme(theme: ThemeId): void;
+  listFiles(): readonly PluginFile[];
+  readText(path: string): Promise<string>;
+  exportText(name: string, text: string): Promise<void>;
+  requestAi(request: AiRequest, signal: AbortSignal): Promise<string>;
+  codexModels(signal: AbortSignal): Promise<readonly AiModel[]>;
+  codexAccount(action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void): Promise<boolean>;
 }
 type Phase = "activating" | "active" | "deactivating" | "inactive" | "failed";
 type Entry = {
@@ -68,7 +79,7 @@ export class PluginHost {
 
   constructor(private readonly workspace: PluginWorkspaceServices, private readonly settings: PluginSettingsStore,
     private readonly report: (error: PluginApiError, pluginId: string) => void = () => {},
-    private readonly lifecycleTimeoutMs = 5000) {}
+    private readonly lifecycleTimeoutMs = 5000, private readonly integrations?: PluginIntegrations) {}
 
   async activate(definition: PluginDefinition, granted: readonly PluginPermission[] = []): Promise<void> {
     if (this.disposed) throw inactive();
@@ -187,6 +198,21 @@ export class PluginHost {
 
   private context(entry: Entry): PluginContext {
     const require = (permission: PluginPermission) => this.check(entry, permission);
+    const integration = (permission: PluginPermission) => {
+      require(permission);
+      if (!this.integrations) throw new PluginApiError("PLUGIN_FAILED", "Integração indisponível neste workspace.");
+      return this.integrations;
+    };
+    const withCancellation = async <T,>(signal: AbortSignal, action: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+      require("ai.request");
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      signal.addEventListener("abort", abort, { once: true });
+      entry.controller.signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted || entry.controller.signal.aborted) abort();
+      try { const result = await action(controller.signal); require("ai.request"); return result; }
+      finally { signal.removeEventListener("abort", abort); entry.controller.signal.removeEventListener("abort", abort); }
+    };
     const snapshot = () => { const value = this.workspace.getActiveDocument(); return value ? Object.freeze({ ...value }) : null; };
     return Object.freeze({
       apiVersion: PLUGIN_API_VERSION, pluginId: entry.manifest.id, signal: entry.controller.signal,
@@ -221,6 +247,25 @@ export class PluginHost {
         this.changed();
         return resource;
       } }),
+      ui: Object.freeze({
+        registerPanel: (panel: PluginPanel) => this.own(entry, integration("ui.panel").registerPanel(entry.manifest.id, panel)),
+        openPanel: () => integration("ui.panel").openPanel(entry.manifest.id),
+      }),
+      appearance: Object.freeze({ setTheme: (theme: ThemeId) => {
+        if (!["crimson", "dawn", "midnight"].includes(theme)) throw new PluginApiError("INVALID_ARGUMENT", "Tema inválido.");
+        integration("appearance.write").setTheme(theme);
+      } }),
+      files: Object.freeze({
+        list: () => integration("files.read").listFiles().map((file) => Object.freeze({ ...file })),
+        readText: async (path: string) => { const text = await integration("files.read").readText(path); require("files.read"); return text; },
+        exportText: async (name: string, text: string) => { await integration("files.export").exportText(name, text); require("files.export"); },
+      }),
+      ai: Object.freeze({
+        models: (signal: AbortSignal) => withCancellation(signal, (cancel) => integration("ai.request").codexModels(cancel)),
+        request: (request: AiRequest, signal: AbortSignal) => withCancellation(signal, (cancel) => integration("ai.request").requestAi(request, cancel)),
+        account: (action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void) =>
+          withCancellation(signal, (cancel) => integration("ai.request").codexAccount(action, cancel, (text) => { if (!cancel.aborted) onOutput(text); })),
+      }),
       settings: Object.freeze({
         get: (key: string) => { require("settings.read"); return this.settings.get(entry.manifest.id, key); },
         set: (key: string, value: JsonValue) => { require("settings.write"); this.settings.set(entry.manifest.id, key, value); },

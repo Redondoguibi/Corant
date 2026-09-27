@@ -1,3 +1,5 @@
+import type { ThemeId } from "../../../plugins/api";
+import { themes } from "../../../plugins/themes";
 import { useEffect, useRef } from "react";
 import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
@@ -8,6 +10,7 @@ type EditorLocation = {
 };
 
 type MonacoEditorProps = {
+  theme?: ThemeId;
   path: string;
   value: string;
   language: string;
@@ -20,6 +23,7 @@ type MonacoEditorProps = {
 };
 
 export function MonacoEditor({
+  theme = "crimson",
   path,
   value,
   language,
@@ -80,7 +84,8 @@ export function MonacoEditor({
       path={path}
       keepCurrentModel
       height="100%"
-      theme="vs-dark"
+      theme={"corant-" + theme}
+      beforeMount={(monaco) => { for (const item of themes) monaco.editor.defineTheme("corant-" + item.id, { base: item.id === "dawn" ? "vs" : "vs-dark", inherit: true, rules: [], colors: { "editor.background": item.background, "editor.foreground": item.foreground } }); }}
       language={language}
       value={value}
       onChange={(nextValue) => onChange(nextValue ?? "")}

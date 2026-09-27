@@ -1,3 +1,5 @@
+import type { ThemeId } from "../../plugins/api";
+import { themes } from "../../plugins/themes";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -7,7 +9,8 @@ import "../../styles/terminal.css";
 
 type TerminalStatus = "starting" | "stopping" | "running" | "stopped" | "exited" | "error";
 
-export function TerminalPanel({ terminal, visible, onHide }: {
+export function TerminalPanel({ terminal, visible, onHide, theme = "crimson" }: {
+  theme?: ThemeId;
   terminal: WorkspaceTerminal;
   visible: boolean;
   onHide: () => void;
@@ -25,6 +28,8 @@ export function TerminalPanel({ terminal, visible, onHide }: {
   const [error, setError] = useState<string | null>(null);
   const [height, setHeight] = useState(250);
   const dragRef = useRef<{ y: number; height: number } | null>(null);
+
+  useEffect(() => { const palette = themes.find((item) => item.id === theme)!; if (xtermRef.current) xtermRef.current.options.theme = { background: palette.background, foreground: palette.foreground, cursor: palette.accent, selectionBackground: palette.accent + "55" }; }, [theme, rendererVersion]);
 
   const fit = useCallback(() => {
     if (!visibleRef.current || !hostRef.current?.isConnected) return;

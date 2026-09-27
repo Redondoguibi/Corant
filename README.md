@@ -156,7 +156,11 @@ O backend Tauri/Rust usa ConPTY no Windows e encerra a árvore de processos ao f
 
 A base da API v1 para plugins internos está implementada em [`src/plugins/api.ts`](src/plugins/api.ts) e [`src/plugins/host.ts`](src/plugins/host.ts). Inclui manifesto versionado, permissões declaradas e concedidas separadamente, ativação/desativação com cancelamento, comandos no menu Executar, acesso ao documento ativo e configurações locais por projeto/plugin. Edições preservam desfazer, autosave e recuperação, e rejeitam documentos ou versões antigos.
 
-O catálogo explícito em [`src/plugins/builtins.ts`](src/plugins/builtins.ts) está vazio até a implementação dos plugins nativos. Essa API executa módulos internos confiáveis; não é um sandbox para código externo. Instalação/remoção, isolamento de plugins externos, integrações adicionais de UI e capacidades nativas continuam planejados. Configurações armazenam preferências, não chaves de API ou outros segredos.
+O catálogo em [src/plugins/builtins.ts](src/plugins/builtins.ts) inclui Copilot, Good Vibes e Commands, disponíveis pelo menu **Executar**. A API executa módulos internos confiáveis; instalação e isolamento de código externo continuam planejados. Preferências são locais por projeto; não armazenam chaves de API.
+
+Copilot conecta diretamente ao OpenRouter (chave mantida somente na memória do painel) ou ao Codex CLI no Windows. Para Codex, instale uma versão do CLI que suporte exec --ignore-user-config --ignore-rules, mantenha o executável nativo ou a instalação global do npm no PATH e clique **Entrar com Codex**. O login padrão abre o navegador automaticamente e o painel deve permanecer aberto até concluir. A alternativa **Entrar por código** mostra endereço e código; precisa estar habilitada na conta/workspace. Links e códigos são removidos ao concluir, cancelar ou falhar; uma nova tentativa gera uma nova sessão. O Corant usa seu próprio CODEX_HOME e o cofre de credenciais do sistema, sem aproveitar o login do CLI pessoal. A sessão do aplicativo exige login antes do primeiro pedido. O Codex executa em modo somente leitura numa pasta de trabalho do aplicativo; o documento ativo só é enviado quando solicitado. Alterações propostas exigem **Aplicar ao documento** e são rejeitadas se a versão mudou.
+
+Good Vibes oferece Crimson, Amanhecer e Meia-noite, incluindo editor e terminal. Commands salva receitas, seleciona arquivos/pastas e gera prévias Markdown, texto ou JSON, com conteúdo opcional; a exportação cria um arquivo novo na raiz do projeto. Limites: 500 arquivos, 1 MiB por arquivo de texto e 4 MiB de conteúdo por exportação.
 
 O sistema completo contempla:
 
@@ -169,7 +173,7 @@ O sistema completo contempla:
 - versionamento;
 - permissões e capacidades nativas.
 
-Plugins nativos planejados:
+Plugins nativos implementados:
 
 #### Copilot
 
@@ -278,7 +282,7 @@ Corant/
 │   └── styles/           # estilos globais e do workspace
 ├── src-tauri/            # backend nativo Tauri/Rust
 ├── public/               # assets públicos, incluindo a identidade visual
-├── plugins/              # espaço reservado para plugins
+├── plugins/              # API e plugins internos
 ├── tests/                # espaço reservado para testes
 ├── docs/                 # documentação adicional
 ├── scripts/              # scripts auxiliares

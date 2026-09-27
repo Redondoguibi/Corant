@@ -1,7 +1,10 @@
+import type { ReactNode } from "react";
+
 export const PLUGIN_API_VERSION = 1 as const;
 
 export const PLUGIN_PERMISSIONS = [
   "workspace.read", "editor.read", "editor.write", "commands.register", "settings.read", "settings.write",
+  "ui.panel", "appearance.write", "files.read", "files.export", "ai.request",
 ] as const;
 export type PluginPermission = typeof PLUGIN_PERMISSIONS[number];
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -28,6 +31,16 @@ export interface DocumentReplacement {
   readonly expectedVersion: number;
   readonly text: string;
 }
+export type ThemeId = "crimson" | "dawn" | "midnight";
+export interface PluginFile { readonly path: string; readonly kind: "file" | "directory" }
+export interface AiModel { model: string; displayName: string; isDefault: boolean }
+export interface AiRequest {
+  provider: "openrouter" | "codex";
+  model: string;
+  apiKey: string;
+  prompt: string;
+}
+export interface PluginPanel { title: string; render(): ReactNode }
 export type CommandHandler = (args: readonly JsonValue[], signal: AbortSignal) => JsonValue | void | Promise<JsonValue | void>;
 
 export interface PluginContext {
@@ -42,6 +55,18 @@ export interface PluginContext {
     onDidChangeActiveDocument(listener: (document: EditorDocument | null) => void): Disposable;
   };
   readonly commands: { register(id: string, handler: CommandHandler): Disposable };
+  readonly ui: { registerPanel(panel: PluginPanel): Disposable; openPanel(): void };
+  readonly appearance: { setTheme(theme: ThemeId): void };
+  readonly files: {
+    list(): readonly PluginFile[];
+    readText(path: string): Promise<string>;
+    exportText(name: string, text: string): Promise<void>;
+  };
+  readonly ai: {
+    request(request: AiRequest, signal: AbortSignal): Promise<string>;
+    models(signal: AbortSignal): Promise<readonly AiModel[]>;
+    account(action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void): Promise<boolean>;
+  };
   readonly settings: {
     get(key: string): JsonValue | undefined;
     set(key: string, value: JsonValue): void;

@@ -1,6 +1,9 @@
 use std::path::Path;
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
+#[cfg(windows)]
+mod codex_models;
+mod native_plugins;
 mod terminal;
 
 #[tauri::command]
@@ -84,6 +87,8 @@ async fn activate_project(
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<terminal::TerminalManager>()
             .activate_project(canonical.clone())?;
+        app.state::<native_plugins::NativePlugins>()
+            .activate(canonical.clone());
         Ok(canonical.to_string_lossy().into_owned())
     })
     .await
@@ -94,6 +99,7 @@ async fn activate_project(
 pub fn run() {
     tauri::Builder::default()
         .manage(terminal::TerminalManager::default())
+        .manage(native_plugins::NativePlugins::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -112,7 +118,13 @@ pub fn run() {
             terminal::terminal_start,
             terminal::terminal_input,
             terminal::terminal_resize,
-            terminal::terminal_stop
+            terminal::terminal_stop,
+            native_plugins::plugin_read_text,
+            native_plugins::plugin_export_text,
+            native_plugins::copilot_request,
+            native_plugins::copilot_cancel,
+            native_plugins::copilot_models,
+            native_plugins::copilot_account
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -123,6 +135,7 @@ pub fn run() {
                 || matches!(&event, tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::Destroyed, .. } if label == "main")
             {
                 app.state::<terminal::TerminalManager>().shutdown();
+                app.state::<native_plugins::NativePlugins>().shutdown();
             }
         });
 }

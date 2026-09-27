@@ -1,3 +1,4 @@
+import "../../styles/plugins.css";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { editor } from "monaco-editor";
@@ -300,7 +301,11 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     path: activeContent ? activeFilePath : null,
     modelUri: activeContent && activeFilePath && monacoRef.current ? monacoRef.current.Uri.parse(activeFilePath).toString() : null,
     isReadOnly: () => leavingRef.current || mutationRef.current,
-  }, reportError);
+  }, reportError, {
+    list: () => entries.map((entry) => ({ path: entry.relativePath, kind: entry.kind })),
+    content: (path) => { const entry = entries.find((item) => item.relativePath === path); return entry ? contentsRef.current[entry.path]?.content : undefined; },
+    refresh: () => setRefreshKey((value) => value + 1),
+  });
 
   function reconcileDirty(path: string, savedContent = originalsRef.current[path]) {
     setDirtyPaths((current) => {
@@ -677,7 +682,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const exitWorkspace = () => leaveWorkspace(async () => {
     await terminalRef.current?.stop();
     await plugins.dispose();
-    await getCurrentWindow().destroy();
+    try { await getCurrentWindow().destroy(); } catch (error) { plugins.restart(); throw error; }
   });
   const exitRef = useRef(exitWorkspace);
   exitRef.current = exitWorkspace;
@@ -1090,7 +1095,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
         event.preventDefault(); event.stopPropagation(); toggleTerminal(); return;
       }
       // Let the shell receive its own control keys when terminal input is focused.
-      if ((event.target as HTMLElement).closest(".terminal-host")) return;
+      if ((event.target as HTMLElement).closest(".terminal-host, .plugin-panel")) return;
       let command: (() => unknown) | undefined;
       if (mod && !event.altKey) {
         if (key === "s") command = event.shiftKey ? saveAll : () => activeFile && saveFile(activeFile.path);
@@ -1113,7 +1118,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   });
 
   return (
-    <main className="workspace-shell">
+    <main className="workspace-shell" data-theme={plugins.theme}>
       <header className="workspace-titlebar">
         <div className="workspace-brand">
           <button className="workspace-back-button" type="button" onClick={closeAllDirtyTabsAndLeave}>
@@ -1310,6 +1315,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
 
               <div className="monaco-host">
                 <MonacoEditor
+                  theme={plugins.theme}
                   path={activeFile.path}
                   value={activeContent.content}
                   language={activeContent.language}
@@ -1333,7 +1339,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
           )}
           {terminalOpened && terminalRef.current && (
             <Suspense fallback={<div className="terminal-loading">Abrindo terminal…</div>}>
-              <TerminalPanel terminal={terminalRef.current} visible={terminalVisible} onHide={() => setTerminalVisible(false)} />
+              <TerminalPanel theme={plugins.theme} terminal={terminalRef.current} visible={terminalVisible} onHide={() => setTerminalVisible(false)} />
             </Suspense>
           )}
           {activeFile && activeContent && (
@@ -1351,6 +1357,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
             </footer>
           )}
         </section>
+        {plugins.activePanel && <aside className="plugin-panel" key={plugins.activePanelId} aria-label={plugins.activePanel.title}><header><strong>{plugins.activePanel.title}</strong><button aria-label="Fechar plugin" onClick={plugins.closePanel}>×</button></header>{plugins.activePanel.render()}</aside>}
       </section>
 
       {contextMenu && (
