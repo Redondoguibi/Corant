@@ -16,6 +16,8 @@ export async function setupWorkspace(page: Page) {
       writes: [] as Array<{ path: string; content: string }>,
       failDestroy: false, authenticated: false, aiRequests: [] as any[], accountActions: [] as string[], cancelled: [] as string[], aiResponse: 'replacement', holdAi: false, pendingAi: [] as Array<{ id: string; release: () => void }>,
       failModels: false, modelCalls: 0, models: [{ model: "test-codex", displayName: "Codex de teste", isDefault: true }, { model: "test-fast", displayName: "Modelo rápido", isDefault: false }],
+      aiEvents: [] as any[], approvals: [] as any[],
+      pluginTextReads: [] as string[],
       holdAccount: false, pendingAccounts: [] as Array<{ id: string; finish: (success: boolean) => void }>,
       failWrites: false, confirmed: true, projectPicker: "/project", destroyed: false,
       directories: [] as string[], holdWrites: false,
@@ -35,9 +37,9 @@ export async function setupWorkspace(page: Page) {
         return state.confirmed ? args.buttons.OkCancelCustom[0] : args.buttons.OkCancelCustom[1];
       }
       if (command === "allow_project_directory") return args.path;
-      if (command === "plugin_read_text") { const text = state.files[args.projectPath + "/" + args.path]; if (text === undefined) throw new Error("Arquivo ausente"); return text; }
+      if (command === "plugin_read_text") { state.pluginTextReads.push(args.path); const text = state.files[args.projectPath + "/" + args.path]; if (text === undefined) throw new Error("Arquivo ausente"); return text; }
       if (command === "plugin_export_text") { const path = args.projectPath + "/" + args.name; if (path in state.files) throw new Error("O nome já existe"); state.files[path] = args.text; return; }
-      if (command === "copilot_models") { state.modelCalls += 1; if (state.failModels) throw new Error("Falha ao consultar modelos"); return state.models; }
+      if (command === "copilot_models") { state.modelCalls += 1; if (state.failModels) throw new Error("Falha ao consultar modelos"); return structuredClone(state.models); }
       if (command === "copilot_account") {
         state.accountActions.push(args.action);
         if (args.action === "login" || args.action === "login-device") {
@@ -48,7 +50,8 @@ export async function setupWorkspace(page: Page) {
         if (args.action === "logout") state.authenticated = false;
         return state.authenticated;
       }
-      if (command === "copilot_request") { state.aiRequests.push(args.request); if (state.holdAi) return new Promise<string>((resolve) => state.pendingAi.push({ id: args.requestId, release: () => resolve(state.aiResponse) })); return state.aiResponse; }
+      if (command === "copilot_request") { state.aiRequests.push(args.request); state.aiEvents.push(args.onEvent); if (state.holdAi) return new Promise<string>((resolve) => state.pendingAi.push({ id: args.requestId, release: () => resolve(state.aiResponse) })); return state.aiResponse; }
+      if (command === "copilot_respond_approval") { state.approvals.push(args); return; }
       if (command === "copilot_cancel") { state.cancelled.push(args.requestId); state.pendingAi.find((request) => request.id === args.requestId)?.release(); state.pendingAccounts.find((request) => request.id === args.requestId)?.finish(false); return; }
       if (command === "terminal_start") {
         state.terminalStarts += 1;

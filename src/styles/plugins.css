@@ -32,3 +32,52 @@
 .workspace-shell[data-theme]:not([data-theme="crimson"]) :is(.tree-file.is-active, .editor-tab.is-active, .corant-context-menu-item:hover, .workspace-menu-triggers > button[aria-expanded="true"], .workspace-menubar button:hover) { background: var(--plugin-input); color: var(--plugin-fg); }
 .workspace-shell[data-theme]:not([data-theme="crimson"]) :is(.global-search-input-row, .text-input) { background: var(--plugin-input); color: var(--plugin-fg); border-color: var(--plugin-border); }
 .workspace-shell[data-theme]:not([data-theme="crimson"]) :is(.global-search-input, .global-search-results, .global-search-match, .field-label, .editor-empty-state span, .editor-empty-state strong) { color: var(--plugin-fg); }
+
+.plugin-panel:has(.copilot-content) { display: flex; flex-direction: column; overflow: hidden; }
+.copilot-content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; gap: 12px; padding: 12px; }
+.copilot-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+.copilot-actions button { font-size: 11px; padding: 7px; }
+.copilot-welcome { margin: auto 0; padding: 32px 12px; text-align: center; }
+.copilot-welcome h2 { font-size: 19px; font-weight: 600; margin: 14px 0 10px; }
+.copilot-mark { color: var(--plugin-accent); font-size: 40px; }
+.copilot-welcome p, .copilot-chat-empty p { color: var(--plugin-muted); }
+.copilot-settings { display: grid; gap: 12px; padding: 12px; background: var(--plugin-input); border: 1px solid var(--plugin-border); border-radius: 8px; }
+.copilot-chat-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.copilot-chat-heading button { font-size: 11px; border: 0; background: transparent; }
+.copilot-messages { flex: 1; min-height: 100px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 18px; padding: 8px 2px; }
+.copilot-chat-empty { margin: auto; padding: 30px 12px; text-align: center; }
+.copilot-chat-empty h3 { font-size: 18px; font-weight: 500; }
+.copilot-message { flex: 0 0 auto; min-width: 0; padding: 10px 0; }
+.copilot-message > strong { display: block; font-size: 11px; color: var(--plugin-muted); margin-bottom: 8px; }
+.copilot-message.user { background: var(--plugin-input); border: 1px solid var(--plugin-border); border-radius: 9px; padding: 12px; }
+.copilot-prose { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.copilot-message pre { background: var(--plugin-input); border: 1px solid var(--plugin-border); border-radius: 6px; padding: 10px; overflow: auto; white-space: pre; }
+.copilot-message .plugin-button-row { margin-top: 10px; }
+.copilot-message button { font-size: 11px; background: transparent; }
+.copilot-composer { flex: 0 0 auto; padding: 10px; border: 1px solid var(--plugin-border); border-radius: 10px; background: var(--plugin-input); }
+.copilot-composer:focus-within { border-color: var(--plugin-accent); }
+.copilot-content .copilot-composer textarea { border: 0; outline: none; padding: 4px; margin: 0; background: transparent; resize: vertical; max-height: 180px; }
+.copilot-composer-tools { display: flex; gap: 5px; align-items: center; margin: 8px 0; }
+.copilot-content .copilot-composer-tools select, .copilot-content .copilot-composer-tools input { min-width: 0; flex: 1; margin: 0; font-size: 11px; padding: 5px; }
+.copilot-composer-tools button { padding: 6px; font-size: 11px; }
+.copilot-content .copilot-edit-option, .copilot-composer > small { font-size: 10px; color: var(--plugin-muted); }
+.copilot-attachment { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--plugin-muted); }
+.copilot-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copilot-attachment button { border: 0; padding: 3px 6px; }
+.copilot-thinking { color: var(--plugin-muted); font-size: 12px; }
+.copilot-approval { border: 1px solid var(--border-color, #666); border-radius: 6px; padding: 10px; margin: 8px 0; }
+.copilot-approval pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.commands-content { align-content: start; }
+.commands-heading h2 { font-size: 18px; margin: 4px 0 8px; }
+.commands-heading p { color: var(--plugin-muted); }
+.commands-catalog, .commands-tool, .commands-result { display: grid; gap: 12px; min-width: 0; }
+.commands-card { display: grid; gap: 6px; text-align: left; padding: 13px !important; }
+.commands-card strong { font-size: 13px; }
+.commands-card > span:last-child { font-size: 12px; color: var(--plugin-muted); line-height: 1.45; }
+.commands-category { color: var(--plugin-accent); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.commands-back { justify-self: start; font-size: 12px; }
+.commands-tool > .plugin-content { padding: 0; }
+.commands-result { margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--plugin-border); }
+.commands-result h3 { margin: 0; font-size: 14px; }
+.commands-result > textarea { white-space: pre; font-family: ui-monospace, Consolas, monospace; }
+.commands-output-name { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 8px; }

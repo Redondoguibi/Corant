@@ -17,6 +17,7 @@ struct Context {
     authenticated: bool,
     closed: bool,
     cancelled: std::collections::VecDeque<String>,
+    approvals: std::collections::HashMap<String, std::sync::mpsc::SyncSender<bool>>,
 }
 #[derive(Default)]
 pub struct NativePlugins(Mutex<Context>);
@@ -103,6 +104,19 @@ pub async fn plugin_read_text(
     .map_err(|_| "Falha ao ler arquivo.".to_string())?
 }
 fn export_file(root: &Path, name: &str, text: &str) -> Result<(), String> {
+    let (stem, extension) = name
+        .rsplit_once('.')
+        .ok_or("Informe um nome e uma extensão para o arquivo.")?;
+    let device = stem
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end()
+        .to_ascii_uppercase();
+    let reserved = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&device.as_str())
+        || (device.len() == 4
+            && (device.starts_with("COM") || device.starts_with("LPT"))
+            && matches!(device.as_bytes()[3], b'1'..=b'9'));
     if name.is_empty()
         || name.len() > 160
         || name != name.trim()
@@ -110,9 +124,13 @@ fn export_file(root: &Path, name: &str, text: &str) -> Result<(), String> {
         || name
             .chars()
             .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
-        || !["md", "txt", "json"].contains(&name.rsplit('.').next().unwrap_or(""))
+        || stem.is_empty()
+        || reserved
+        || extension.is_empty()
+        || extension.len() > 16
+        || !extension.chars().all(|c| c.is_ascii_alphanumeric())
     {
-        return Err("Use um nome de arquivo .md, .txt ou .json, sem pastas.".into());
+        return Err("Use um nome de arquivo válido, sem pastas, e uma extensão de até 16 letras ou números.".into());
     }
     if text.len() > 8 * 1024 * 1024 {
         return Err("A exportação excede 8 MiB.".into());
@@ -160,17 +178,50 @@ pub async fn plugin_export_text(
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum AccessMode {
+    Ask,
+    Auto,
+    Full,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiRequest {
     provider: String,
     model: String,
     api_key: String,
     prompt: String,
+    access_mode: Option<AccessMode>,
 }
-struct Operation {
+pub(super) struct Operation {
     app: tauri::AppHandle,
     id: String,
-    stop: Arc<AtomicBool>,
+    pub(super) stop: Arc<AtomicBool>,
+}
+impl Operation {
+    pub(super) fn approval(&self, id: String) -> Result<std::sync::mpsc::Receiver<bool>, String> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let state = self.app.state::<NativePlugins>();
+        let mut state = state.0.lock().map_err(|_| "Estado indisponível.")?;
+        if self.stop.load(Ordering::SeqCst) {
+            return Err("Operação cancelada.".into());
+        }
+        if state.approvals.len() >= 32 {
+            return Err("Muitas aprovações pendentes.".into());
+        }
+        state.approvals.insert(id, tx);
+        Ok(rx)
+    }
+    pub(super) fn clear_approval(&self, id: &str) {
+        self.app
+            .state::<NativePlugins>()
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .approvals
+            .remove(id);
+    }
 }
 impl Drop for Operation {
     fn drop(&mut self) {
@@ -182,8 +233,48 @@ impl Drop for Operation {
             .is_some_and(|(id, _)| id == &self.id)
         {
             state.operation = None;
+            state.approvals.clear();
         }
     }
+}
+#[tauri::command]
+pub fn copilot_respond_approval(
+    window: tauri::WebviewWindow,
+    state: tauri::State<NativePlugins>,
+    project_path: String,
+    request_id: String,
+    approval_id: String,
+    approved: bool,
+) -> Result<(), String> {
+    main_window(&window)?;
+    let root = state.project(&project_path)?;
+    let mut context = state.0.lock().map_err(|_| "Estado indisponível.")?;
+    if context.project.as_ref() != Some(&root) {
+        return Err("O projeto mudou.".into());
+    }
+    resolve_approval(&mut context, &request_id, &approval_id, approved)
+}
+
+fn resolve_approval(
+    context: &mut Context,
+    request_id: &str,
+    approval_id: &str,
+    approved: bool,
+) -> Result<(), String> {
+    if context.closed
+        || !context
+            .operation
+            .as_ref()
+            .is_some_and(|(id, stop)| id == request_id && !stop.load(Ordering::SeqCst))
+    {
+        return Err("A solicitação expirou.".into());
+    }
+    context
+        .approvals
+        .remove(approval_id)
+        .ok_or("A aprovação já foi respondida ou expirou.")?
+        .try_send(approved)
+        .map_err(|_| "A solicitação expirou.".into())
 }
 fn begin(app: &tauri::AppHandle, project: &str, id: String) -> Result<Operation, String> {
     let state = app.state::<NativePlugins>();
@@ -286,6 +377,7 @@ pub async fn copilot_request(
     project_path: String,
     request_id: String,
     request: AiRequest,
+    on_event: Channel<serde_json::Value>,
 ) -> Result<String, String> {
     main_window(&window)?;
     if request.prompt.trim().is_empty()
@@ -299,6 +391,9 @@ pub async fn copilot_request(
     let operation = begin(&app, &project_path, request_id)?;
     match request.provider.as_str() {
         "openrouter" => {
+            if request.access_mode.is_some() {
+                return Err("Os modos de acesso ao projeto estão disponíveis com Codex.".into());
+            }
             tokio::select! {
                 result = openrouter(&request) => result,
                 _ = async { while !operation.stop.load(Ordering::SeqCst) { tokio::time::sleep(Duration::from_millis(50)).await; } } => Err("Operação cancelada.".into()),
@@ -315,7 +410,7 @@ pub async fn copilot_request(
                 return Err("Entre com Codex antes de enviar.".into());
             }
             tauri::async_runtime::spawn_blocking(move || {
-                codex_run(&operation, "exec", Some(request), None)
+                codex_run(&operation, "exec", Some(request), None, Some(on_event))
             })
             .await
             .map_err(|_| "Falha no Codex.".to_string())?
@@ -351,7 +446,7 @@ pub async fn copilot_models(
         return Err("Entre com Codex para consultar os modelos.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let json = codex_run(&operation, "models", None, None)?;
+        let json = codex_run(&operation, "models", None, None, None)?;
         serde_json::from_str(&json).map_err(|_| "Lista de modelos inválida.".into())
     })
     .await
@@ -386,7 +481,7 @@ pub async fn copilot_account(
             .lock()
             .map_err(|_| "Estado indisponível.")?
             .authenticated = false;
-        codex_run(&operation, &action, None, Some(on_output))?;
+        codex_run(&operation, &action, None, Some(on_output), None)?;
         if operation.stop.load(Ordering::SeqCst) {
             return Err("Operação cancelada.".into());
         }
@@ -408,6 +503,7 @@ fn codex_run(
     _: &str,
     _: Option<AiRequest>,
     _: Option<Channel<Vec<u8>>>,
+    _: Option<Channel<serde_json::Value>>,
 ) -> Result<String, String> {
     Err("Codex integrado disponível no Windows nesta versão.".into())
 }
@@ -418,6 +514,7 @@ fn codex_run(
     action: &str,
     request: Option<AiRequest>,
     output: Option<Channel<Vec<u8>>>,
+    events: Option<Channel<serde_json::Value>>,
 ) -> Result<String, String> {
     use std::{ffi::OsStr, os::windows::ffi::OsStrExt, sync::mpsc, time::Instant};
     let paths: Vec<_> = std::env::var_os("PATH")
@@ -466,7 +563,7 @@ fn codex_run(
         "cli_auth_credentials_store=\"keyring\"".into(),
         "-c".into(),
         "forced_login_method=\"chatgpt\"".into(),
-        if action == "models" {
+        if action == "models" || request.as_ref().is_some_and(|r| r.access_mode.is_some()) {
             "app-server".into()
         } else if action == "login-device" {
             "login".into()
@@ -477,7 +574,7 @@ fn codex_run(
     if let Some(script) = launcher {
         args.insert(0, script.to_string_lossy().into_owned());
     }
-    if action == "models" {
+    if action == "models" || request.as_ref().is_some_and(|r| r.access_mode.is_some()) {
         args.extend(["--listen".to_string(), "stdio://".to_string()]);
         let mut command = std::process::Command::new(&executable);
         command
@@ -485,7 +582,31 @@ fn codex_run(
             .current_dir(&work)
             .env_clear()
             .envs(environment);
-        return super::codex_models::list(&mut command, &operation.stop);
+        if action == "models" {
+            return super::codex_models::list(&mut command, &operation.stop);
+        }
+        let root = operation
+            .app
+            .state::<NativePlugins>()
+            .0
+            .lock()
+            .map_err(|_| "Estado indisponível.")?
+            .project
+            .clone()
+            .ok_or("Nenhum projeto ativo.")?;
+        let request = request.ok_or("Pedido indisponível.")?;
+        return super::codex_agent::run(
+            &mut command,
+            operation,
+            &root,
+            request
+                .access_mode
+                .as_ref()
+                .ok_or("Permissão não definida.")?,
+            &request.model,
+            &request.prompt,
+            &events.ok_or("Canal de aprovação indisponível.")?,
+        );
     }
     let result_path = work.join(format!("response-{}.txt", operation.id));
     if action == "login-device" {
@@ -631,6 +752,26 @@ fn quote_arg(arg: &str) -> String {
 mod tests {
     use super::*;
     #[test]
+    fn approvals_cannot_be_replayed_or_cross_request_boundaries() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut context = Context {
+            operation: Some(("current".into(), stop.clone())),
+            ..Context::default()
+        };
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        context.approvals.insert("action".into(), tx);
+        assert!(resolve_approval(&mut context, "old", "action", true).is_err());
+        assert!(rx.try_recv().is_err());
+        assert!(resolve_approval(&mut context, "current", "action", false).is_ok());
+        assert!(!rx.recv().unwrap());
+        assert!(resolve_approval(&mut context, "current", "action", true).is_err());
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        context.approvals.insert("next".into(), tx);
+        stop.store(true, Ordering::SeqCst);
+        assert!(resolve_approval(&mut context, "current", "next", true).is_err());
+        assert!(rx.try_recv().is_err());
+    }
+    #[test]
     fn exports_never_overwrite_and_paths_stay_relative() {
         let root = std::env::temp_dir().join(format!("corant-plugins-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -644,6 +785,20 @@ mod tests {
         assert!(relative_file(&root, "C:\\outside").is_err());
         assert!(export_file(&root, "../bad.txt", "bad").is_err());
         assert!(limited_text(&root.join(name), 2).is_err());
+        for invalid in [
+            "NUL.txt",
+            "COM1.csv",
+            ".txt",
+            "folder/file.tree",
+            "tree.bad-ext",
+        ] {
+            assert!(export_file(&root, invalid, "text").is_err());
+        }
+        for custom in ["inventory.csv", "structure.tree"] {
+            export_file(&root, custom, "text").unwrap();
+            assert_eq!(limited_text(&root.join(custom), 20).unwrap(), "text");
+            std::fs::remove_file(root.join(custom)).unwrap();
+        }
         std::fs::remove_file(root.join(name)).unwrap();
         std::fs::remove_dir(root).unwrap();
     }

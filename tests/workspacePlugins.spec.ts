@@ -3,7 +3,7 @@ import { setupWorkspace } from "./workspaceTestSetup";
 
 test.beforeEach(async ({ page }) => {
   // Supply a trusted test plugin through the same explicit catalog used by the app.
-  await page.route("**/src/plugins/builtins.ts", (route) => route.fulfill({
+  await page.route((url) => url.pathname === "/src/plugins/builtins.ts", (route) => route.fulfill({
     contentType: "application/javascript",
     body: `
       const permissions = ["workspace.read", "editor.read", "editor.write", "commands.register"];

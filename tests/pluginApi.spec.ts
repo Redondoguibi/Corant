@@ -150,3 +150,26 @@ test("settings remain isolated by plugin and workspace and report storage errors
   expect(result).toEqual({ actual: { theme: "dark" }, isolated: true, removed: true,
     codes: [...Array(4).fill("INVALID_ARGUMENT"), "STORAGE_ERROR"] });
 });
+
+test("native AI execution needs a separate grant and scans cannot return after revocation", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { PluginHost, workspace, settings, manifest } = (window as any).pluginTest;
+    let release!: () => void;
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    let calls = 0;
+    const host = new PluginHost(workspace, settings, () => {}, 100, {
+      requestAi: async () => { calls++; return "unexpected"; },
+      scanFiles: async () => { await wait; return [{ path: "file.txt", kind: "file" }]; },
+      selectedFile: () => ({ path: "folder", kind: "directory" }),
+    });
+    let api: any;
+    const definition = { ...manifest, permissions: ["ai.request", "files.read"] };
+    await host.activate({ manifest: definition, activate(context: any) { api = context; } }, definition.permissions);
+    const selection = api.files.getSelection();
+    const execution = await api.ai.request({ provider: "codex", model: "", apiKey: "", prompt: "test", accessMode: "full" }, new AbortController().signal).catch((cause: any) => cause.code);
+    const scan = api.files.scan().catch((cause: any) => cause.code);
+    await host.dispose(); release();
+    return { execution, calls, selection, frozen: Object.isFrozen(selection), scan: await scan };
+  });
+  expect(result).toEqual({ execution: "PERMISSION_DENIED", calls: 0, selection: { path: "folder", kind: "directory" }, frozen: true, scan: "PLUGIN_INACTIVE" });
+});

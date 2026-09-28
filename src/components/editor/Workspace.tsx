@@ -7,6 +7,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { MonacoEditor } from "./monaco/MonacoEditor";
+import { ImagePreview } from "./ImagePreview";
+import { imageMimeType } from "../../services/projectImages";
 import { ExplorerNameDialog } from "./ExplorerNameDialog";
 import { GlobalSearchPanel } from "./GlobalSearchPanel";
 import { WorkspaceMenuBar, type WorkspaceMenu, type WorkspaceMenuItem } from "./WorkspaceMenuBar";
@@ -99,6 +101,7 @@ function getLanguage(name: string) {
     case "html":
     case "htm":
       return "html";
+    case "svg":
     case "xml":
       return "xml";
     case "md":
@@ -141,6 +144,7 @@ function getLanguage(name: string) {
 }
 
 function getFileIcon(name: string) {
+  if (imageMimeType(name)) return "▧";
   const extension = name.split(".").pop()?.toLowerCase();
 
   switch (extension) {
@@ -206,6 +210,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const [entries, setEntries] = useState<ProjectFile[]>([]);
   const [openTabPaths, setOpenTabPaths] = useState<string[]>([]);
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [svgCodePath, setSvgCodePath] = useState<string | null>(null);
   const [selectedEntryPath, setSelectedEntryPath] = useState<string | null>(null);
   const [fileContents, setFileContents] = useState<Record<string, FileContent>>({});
   const [originalContents, setOriginalContents] = useState<Record<string, string>>({});
@@ -231,6 +236,8 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const leavingRef = useRef(false);
   const [isMutating, setIsMutating] = useState(false);
   const mutationRef = useRef(false);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const agentTask = useRef<{ controller: AbortController; done: Promise<string> } | null>(null);
   const autosaveTimers = useRef(new Map<string, { timer: number; content: string }>());
   const contentsRef = useRef(fileContents);
   const originalsRef = useRef(originalContents);
@@ -255,6 +262,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     modelListener.current = instance.onDidChangeModel(trackModel);
   }, []);
   useEffect(() => () => {
+    agentTask.current?.controller.abort();
     for (const { timer } of autosaveTimers.current.values()) window.clearTimeout(timer);
     autosaveTimers.current.clear();
     modelListener.current?.dispose();
@@ -295,7 +303,9 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     [activeFilePath, files],
   );
 
-  const activeContent = activeFile ? fileContents[activeFile.path] : null;
+  const activeImageType = activeFile ? imageMimeType(activeFile.name) : null;
+  const previewImage = Boolean(activeImageType && !(activeImageType === "image/svg+xml" && svgCodePath === activeFilePath));
+  const activeContent = activeFile && !previewImage ? fileContents[activeFile.path] : null;
   const plugins = useWorkspacePlugins({ name: projectName, path: projectPath }, {
     instance: editorInstance,
     path: activeContent ? activeFilePath : null,
@@ -303,8 +313,10 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     isReadOnly: () => leavingRef.current || mutationRef.current,
   }, reportError, {
     list: () => entries.map((entry) => ({ path: entry.relativePath, kind: entry.kind })),
+    selected: () => selectedEntry ? { path: selectedEntry.relativePath, kind: selectedEntry.kind } : null,
     content: (path) => { const entry = entries.find((item) => item.relativePath === path); return entry ? contentsRef.current[entry.path]?.content : undefined; },
     refresh: () => setRefreshKey((value) => value + 1),
+    runAgent: runWorkspaceAgent,
   });
 
   function reconcileDirty(path: string, savedContent = originalsRef.current[path]) {
@@ -329,6 +341,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     file: ProjectFile,
     location?: { lineNumber: number; column: number },
   ) {
+    setSvgCodePath(location && imageMimeType(file.name) === "image/svg+xml" ? file.path : null);
     setSelectedEntryPath(file.path);
     setActiveFilePath(file.path);
     setOpenTabPaths((current) =>
@@ -462,6 +475,10 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       const entry = contextMenu.targetPath
         ? entries.find((item) => item.path === contextMenu.targetPath) ?? null
         : null;
+      const folderTools: ContextMenuItem[] = plugins.commands.some((command) => command.id === "corant.commands.tree") ? [{
+        id: "commands-tree", label: "Exportar árvore da pasta…", separatorBefore: true,
+        onSelect: () => plugins.executeCommand("corant.commands.tree"),
+      }] : [];
 
       if (!entry) {
         return [
@@ -475,6 +492,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
             label: "Nova Pasta",
             onSelect: () => openNameDialog("folder"),
           },
+          ...folderTools,
           {
             id: "refresh",
             label: "Atualizar",
@@ -496,6 +514,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
             label: "Nova Pasta",
             onSelect: () => openNameDialog("folder"),
           },
+          ...folderTools,
           {
             id: "rename",
             label: "Renomear",
@@ -657,7 +676,79 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     }
   }
 
+  function runWorkspaceAgent(work: (signal: AbortSignal) => Promise<string>, signal: AbortSignal): Promise<string> {
+    if (mutationRef.current || leavingRef.current || signal.aborted) return Promise.reject(new Error("Workspace ocupado ou operação cancelada."));
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    mutationRef.current = true;
+    setIsMutating(true);
+    setAgentBusy(true);
+    const done = (async () => {
+      try {
+        // Save and drain before granting native tools access to the project.
+        await saveAll();
+        if (controller.signal.aborted) throw new Error("Operação cancelada.");
+        return await saveQueue.current.withPathsLocked(() => true, async () => {
+          try { return await work(controller.signal); }
+          finally {
+            // The native process tree has exited even on cancellation/failure.
+            let diskEntries: ProjectFile[];
+            try { diskEntries = await listProjectEntries(projectPath); }
+            catch (cause) {
+              // Stale buffers must never become the source of a later autosave.
+              removeLoadedPaths(() => true);
+              throw cause;
+            }
+            const existing = new Set(diskEntries.filter((entry) => entry.kind === "file").map((entry) => entry.path));
+            const existingPaths = new Set(diskEntries.map((entry) => entry.path));
+            for (const entry of entries) {
+              if (!existingPaths.has(entry.path)) clearRecoverySnapshotsForPath(projectPath, entry.path, entry.kind === "directory");
+            }
+            for (const [path, file] of Object.entries(contentsRef.current)) {
+              if (!existing.has(path)) {
+                clearRecoverySnapshot(projectPath, path);
+                removeLoadedPaths((candidate) => candidate === path);
+                continue;
+              }
+              let content: string;
+              try { content = await readProjectFile(path); }
+              catch (cause) { removeLoadedPaths((candidate) => candidate === path); reportError(cause); continue; }
+              if (content === file.content) continue;
+              const model = monacoRef.current?.editor.getModel(monacoRef.current.Uri.parse(path));
+              if (model && !model.isDisposed()) {
+                model.pushStackElement();
+                model.pushEditOperations([], [{ range: model.getFullModelRange(), text: content }], () => null);
+                model.pushStackElement();
+              }
+              contentsRef.current = { ...contentsRef.current, [path]: { ...file, content } };
+              originalsRef.current = { ...originalsRef.current, [path]: content };
+              clearRecoverySnapshot(projectPath, path);
+            }
+            setFileContents(contentsRef.current);
+            setOriginalContents(originalsRef.current);
+            setDirtyPaths(new Set());
+            setRefreshKey((value) => value + 1);
+          }
+        });
+      } finally {
+        signal.removeEventListener("abort", abort);
+        agentTask.current = null;
+        mutationRef.current = false;
+        setIsMutating(false);
+        setAgentBusy(false);
+        scheduleDirtyAutosaves();
+      }
+    })();
+    agentTask.current = { controller, done };
+    return done;
+  }
+
   async function leaveWorkspace(action: () => void | Promise<void>) {
+    if (agentTask.current) {
+      agentTask.current.controller.abort();
+      await agentTask.current.done.catch(reportError);
+    }
     if (leavingRef.current || mutationRef.current) return;
     leavingRef.current = true;
     setIsLeaving(true);
@@ -763,7 +854,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }, [projectPath, refreshKey]);
 
   useEffect(() => {
-    if (!activeFile || fileContents[activeFile.path]) return;
+    if (agentBusy || !activeFile || previewImage || fileContents[activeFile.path]) return;
 
     let cancelled = false;
 
@@ -831,7 +922,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     return () => {
       cancelled = true;
     };
-  }, [activeFile, fileContents, projectPath]);
+  }, [activeFile, fileContents, projectPath, agentBusy, previewImage]);
 
   useEffect(() => {
     scheduleDirtyAutosaves();
@@ -1147,8 +1238,8 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
         <button type="button" aria-label="Dispensar erro" onClick={() => setError(null)}>×</button>
       </div>}
 
-      <section className="workspace-body" inert={isLeaving || isMutating}>
-        <aside className="workspace-sidebar" style={{ width: sidebarWidth, display: sidebarVisible ? undefined : "none" }}>
+      <section className="workspace-body" inert={isLeaving || (isMutating && !agentBusy)}>
+        <aside className="workspace-sidebar" inert={agentBusy} style={{ width: sidebarWidth, display: sidebarVisible ? undefined : "none" }}>
           {sidebarMode === "explorer" ? (
             <>
               <div className="sidebar-heading">
@@ -1259,7 +1350,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
 
         {sidebarVisible && <div className="workspace-sidebar-resizer" aria-hidden="true" />}
 
-        <section className="workspace-editor-area">
+        <section className="workspace-editor-area" inert={agentBusy}>
           <div className="editor-tabs" role="tablist" aria-label="Arquivos abertos">
             {openTabs.map((file) => {
               const isActive = file.path === activeFilePath;
@@ -1299,7 +1390,15 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
             })}
           </div>
 
-          {activeFile && activeContent ? (
+          {activeFile && previewImage ? (
+            <>
+              <div className="editor-toolbar">
+                <div className="editor-breadcrumbs"><span>{projectName}</span><span>/</span><span>{activeFile.relativePath}</span></div>
+                {activeImageType === "image/svg+xml" && <button className="image-view-toggle" onClick={() => setSvgCodePath(activeFile.path)}>Editar SVG</button>}
+              </div>
+              <ImagePreview key={`${activeFile.path}:${refreshKey}`} path={activeFile.path} name={activeFile.name} source={activeImageType === "image/svg+xml" ? fileContents[activeFile.path]?.content : undefined} />
+            </>
+          ) : activeFile && activeContent ? (
             <>
               <div className="editor-toolbar">
                 <div className="editor-breadcrumbs">
@@ -1308,6 +1407,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
                   <span>{activeFile.relativePath}</span>
                 </div>
                 <div className="editor-toolbar-actions">
+                  {activeImageType === "image/svg+xml" && <button className="image-view-toggle" onClick={() => setSvgCodePath(null)}>Visualizar SVG</button>}
                   <span>{activeContent.language}</span>
                   <span>UTF-8</span>
                 </div>

@@ -2,7 +2,7 @@ import {
   PLUGIN_API_VERSION, PLUGIN_PERMISSIONS, PluginApiError,
   type CommandHandler, type Disposable, type DocumentReplacement, type EditorDocument,
   type JsonValue, type PluginCommand, type PluginContext, type PluginDefinition,
-  type PluginManifest, type PluginPermission, type ProjectInfo, type PluginPanel, type ThemeId, type PluginFile, type AiRequest, type AiModel,
+  type PluginManifest, type PluginPermission, type ProjectInfo, type PluginPanel, type ThemeId, type PluginFile, type AiRequest, type AiModel, type AiEventHandler,
 } from "./api";
 import { copyJson, type PluginSettingsStore } from "./settings";
 
@@ -17,9 +17,11 @@ export interface PluginIntegrations {
   openPanel(id: string): void;
   setTheme(theme: ThemeId): void;
   listFiles(): readonly PluginFile[];
+  scanFiles(): Promise<readonly PluginFile[]>;
+  selectedFile(): PluginFile | null;
   readText(path: string): Promise<string>;
   exportText(name: string, text: string): Promise<void>;
-  requestAi(request: AiRequest, signal: AbortSignal): Promise<string>;
+  requestAi(request: AiRequest, signal: AbortSignal, onEvent?: AiEventHandler): Promise<string>;
   codexModels(signal: AbortSignal): Promise<readonly AiModel[]>;
   codexAccount(action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void): Promise<boolean>;
 }
@@ -257,12 +259,17 @@ export class PluginHost {
       } }),
       files: Object.freeze({
         list: () => integration("files.read").listFiles().map((file) => Object.freeze({ ...file })),
+        scan: async () => { const files = await integration("files.read").scanFiles(); require("files.read"); return files.map((file) => Object.freeze({ ...file })); },
+        getSelection: () => { const file = integration("files.read").selectedFile(); return file ? Object.freeze({ ...file }) : null; },
         readText: async (path: string) => { const text = await integration("files.read").readText(path); require("files.read"); return text; },
         exportText: async (name: string, text: string) => { await integration("files.export").exportText(name, text); require("files.export"); },
       }),
       ai: Object.freeze({
         models: (signal: AbortSignal) => withCancellation(signal, (cancel) => integration("ai.request").codexModels(cancel)),
-        request: (request: AiRequest, signal: AbortSignal) => withCancellation(signal, (cancel) => integration("ai.request").requestAi(request, cancel)),
+        request: (request: AiRequest, signal: AbortSignal, onEvent?: AiEventHandler) => withCancellation(signal, (cancel) => {
+          if (request.accessMode !== undefined) require("ai.execute");
+          return integration("ai.request").requestAi(request, cancel, onEvent);
+        }),
         account: (action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void) =>
           withCancellation(signal, (cancel) => integration("ai.request").codexAccount(action, cancel, (text) => { if (!cancel.aborted) onOutput(text); })),
       }),

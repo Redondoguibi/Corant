@@ -4,7 +4,7 @@ export const PLUGIN_API_VERSION = 1 as const;
 
 export const PLUGIN_PERMISSIONS = [
   "workspace.read", "editor.read", "editor.write", "commands.register", "settings.read", "settings.write",
-  "ui.panel", "appearance.write", "files.read", "files.export", "ai.request",
+  "ui.panel", "appearance.write", "files.read", "files.export", "ai.request", "ai.execute",
 ] as const;
 export type PluginPermission = typeof PLUGIN_PERMISSIONS[number];
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -34,11 +34,16 @@ export interface DocumentReplacement {
 export type ThemeId = "crimson" | "dawn" | "midnight";
 export interface PluginFile { readonly path: string; readonly kind: "file" | "directory" }
 export interface AiModel { model: string; displayName: string; isDefault: boolean }
+export type CopilotAccessMode = "ask" | "auto" | "full";
+export interface AiApproval { id: string; title: string; detail: string; canApprove: boolean }
+export type AiEvent = { type: "approval"; approval: AiApproval } | { type: "resolved"; id: string } | { type: "status"; text: string };
+export type AiEventHandler = (event: AiEvent, respond: (id: string, approved: boolean) => Promise<void>) => void;
 export interface AiRequest {
   provider: "openrouter" | "codex";
   model: string;
   apiKey: string;
   prompt: string;
+  accessMode?: CopilotAccessMode;
 }
 export interface PluginPanel { title: string; render(): ReactNode }
 export type CommandHandler = (args: readonly JsonValue[], signal: AbortSignal) => JsonValue | void | Promise<JsonValue | void>;
@@ -59,11 +64,13 @@ export interface PluginContext {
   readonly appearance: { setTheme(theme: ThemeId): void };
   readonly files: {
     list(): readonly PluginFile[];
+    scan(): Promise<readonly PluginFile[]>;
+    getSelection(): PluginFile | null;
     readText(path: string): Promise<string>;
     exportText(name: string, text: string): Promise<void>;
   };
   readonly ai: {
-    request(request: AiRequest, signal: AbortSignal): Promise<string>;
+    request(request: AiRequest, signal: AbortSignal, onEvent?: AiEventHandler): Promise<string>;
     models(signal: AbortSignal): Promise<readonly AiModel[]>;
     account(action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void): Promise<boolean>;
   };

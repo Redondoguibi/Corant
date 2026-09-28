@@ -1,9 +1,8 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { AiModel, AiRequest } from "./api";
+import type { AiEvent, AiEventHandler, AiModel, AiRequest } from "./api";
 
-async function cancellable<T>(command: string, args: object, signal: AbortSignal): Promise<T> {
+async function cancellable<T>(command: string, args: object, signal: AbortSignal, requestId = crypto.randomUUID()): Promise<T> {
   if (signal.aborted) throw new Error("Operação cancelada.");
-  const requestId = crypto.randomUUID();
   const cancel = () => { void invoke("copilot_cancel", { requestId }).catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   try {
@@ -12,8 +11,14 @@ async function cancellable<T>(command: string, args: object, signal: AbortSignal
     return result;
   } finally { signal.removeEventListener("abort", cancel); }
 }
-export function requestAi(projectPath: string, request: AiRequest, signal: AbortSignal) {
-  return cancellable<string>("copilot_request", { projectPath, request }, signal);
+export function requestAi(projectPath: string, request: AiRequest, signal: AbortSignal, onEvent?: AiEventHandler) {
+  const requestId = crypto.randomUUID();
+  const respond = async (approvalId: string, approved: boolean) => {
+    if (signal.aborted) throw new Error("Operação cancelada.");
+    await invoke("copilot_respond_approval", { projectPath, requestId, approvalId, approved });
+  };
+  const channel = new Channel<AiEvent>((event) => { if (!signal.aborted) onEvent?.(event, respond); });
+  return cancellable<string>("copilot_request", { projectPath, request, onEvent: channel }, signal, requestId);
 }
 export function codexAccount(projectPath: string, action: "login" | "login-device" | "logout" | "status", signal: AbortSignal, onOutput: (text: string) => void) {
   const decoder = new TextDecoder();

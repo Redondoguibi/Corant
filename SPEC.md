@@ -544,20 +544,22 @@ Current design direction includes approximately three themes, with light/dark su
 
 #### Commands
 
-A native configurable command/plugin system.
+A catalog of local everyday workflow tools for projects in any field, not limited to programming. Tools have their own forms, preview/results, and copy or create-new export actions.
 
-A command is intended to be defined through a form rather than requiring the user to write plugin code.
+The initial collection contains ten tools:
 
-Example command concept:
+- folder tree export (visual tree, Markdown, or nested JSON)
+- merge text documents (including previously saved export recipes)
+- file inventory (CSV or JSON)
+- Markdown checklist creation
+- text statistics
+- letter-case conversion
+- whitespace cleanup
+- line sorting
+- duplicate-line removal
+- literal find and replace
 
-- choose starting folder
-- choose selected files/folders or a source location
-- convert files/folders to text
-- choose output format such as MD/TXT/JSON
-- choose whether file contents should be included
-- define other variables/options through a form
-
-The purpose is to let users create reusable workflow commands without programming each one as a plugin.
+A selected Explorer folder is the default input for folder tools. The folder context menu also opens tree export directly. Trees include nested and empty directories, skip symbolic links, and do not read file contents. Tree representation and output extension are independent choices. Exports create a new file in the project root and never overwrite an existing file. Tools operate locally; text transformations do not modify the source document.
 
 ---
 
@@ -1201,7 +1203,7 @@ This list is a working map rather than a guarantee that no other files matter.
 | Plugin framework | API v1 foundation current for trusted built-ins; external plugins planned |
 | Copilot plugin | Current: OpenRouter and Windows Codex CLI with explicit isolated login |
 | Good Vibes plugin | Current: Crimson, Dawn and Midnight themes |
-| Commands plugin | Current: saved export recipes with preview and create-new output |
+| Commands plugin | Current: ten everyday tools, Explorer folder tree export, independent output extension, preserved merge recipes |
 | Git integration | Community plugin direction |
 
 ---

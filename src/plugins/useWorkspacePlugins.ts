@@ -7,10 +7,11 @@ import { builtinPlugins } from "./builtins";
 import { createPluginEditorBridge, type PluginEditorState } from "./editorBridge";
 import { PluginHost } from "./host";
 import { createPluginSettings } from "./settings";
+import { listProjectEntries } from "../services/projectFilesystem";
 
 let previousWorkspaceCleanup: Promise<void> = Promise.resolve();
 
-export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEditorState, report: (error: unknown) => void, files: { list(): readonly PluginFile[]; content(path: string): string | undefined; refresh(): void }) {
+export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEditorState, report: (error: unknown) => void, files: { list(): readonly PluginFile[]; selected(): PluginFile | null; content(path: string): string | undefined; refresh(): void; runAgent(work: (signal: AbortSignal) => Promise<string>, signal: AbortSignal): Promise<string> }) {
   const latest = useRef({ project, editorState, report, files });
   latest.current = { project, editorState, report, files };
   const [generation, setGeneration] = useState(0);
@@ -39,6 +40,8 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
       registerPanel: (id, panel) => { setPanels((current) => ({ ...current, [id]: panel })); return { dispose: () => { setPanels((current) => { const next = { ...current }; delete next[id]; return next; }); setActivePanelId((current) => current === id ? null : current); } }; },
       openPanel: setActivePanelId, setTheme,
       listFiles: () => latest.current.files.list(),
+      selectedFile: () => latest.current.files.selected(),
+      scanFiles: async () => (await listProjectEntries(project.path)).map((entry) => ({ path: entry.relativePath, kind: entry.kind })),
       readText: async (path) => {
         const disk = await invoke<string>("plugin_read_text", { projectPath: project.path, path });
         const text = latest.current.files.content(path) ?? disk;
@@ -51,7 +54,9 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
         if (!disposed) latest.current.files.refresh();
       },
       codexModels: (signal) => codexModels(project.path, signal),
-      requestAi: (request, signal) => requestAi(project.path, request, signal),
+      requestAi: (request, signal, onEvent) => request.accessMode
+        ? latest.current.files.runAgent((cancel) => requestAi(project.path, request, cancel, onEvent), signal)
+        : requestAi(project.path, request, signal, onEvent),
       codexAccount: (action, signal, output) => codexAccount(project.path, action, signal, output),
     });
     hostRef.current = host;

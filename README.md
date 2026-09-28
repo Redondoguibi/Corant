@@ -1,20 +1,20 @@
 # Corant
 
-> Workspace desktop local-first para desenvolvimento e projetos criativos/técnicos.
+> Workspace desktop local-first para organizar arquivos, editar documentos e trabalhar em projetos de qualquer área.
 
-O **Corant** é um aplicativo desktop focado em trabalhar diretamente com projetos locais. A proposta é combinar gerenciamento de arquivos, edição de código, ferramentas integradas e, futuramente, plugins e automações em um único workspace.
+O **Corant** é um aplicativo desktop focado em trabalhar diretamente com projetos locais. A proposta é combinar gerenciamento de arquivos, edição de texto/código, terminal e plugins internos em um único workspace.
 
 A filosofia do produto é simples: **abrir um projeto → ter as ferramentas integradas → começar a trabalhar**.
 
 ## Visão do produto
 
-O Corant é pensado como uma alternativa mais integrada e focada a um editor de código tradicional.
+O Corant reúne ferramentas para projetos e tarefas do dia a dia; seu uso não se limita à programação.
 
 - **Local-first:** o projeto vive no filesystem local.
 - **Sem conta obrigatória:** o núcleo não depende de uma conta online.
 - **Sem backend obrigatório:** o produto principal não depende de um servidor ou banco de dados central.
 - **Projeto como unidade principal:** o usuário abre ou cria um projeto e trabalha dentro dele.
-- **Extensível:** plugins fazem parte da visão de longo prazo, mas só serão definidos depois da estabilização do núcleo.
+- **Extensível:** a API interna e três plugins já estão implementados; instalação de plugins externos continua planejada.
 
 ### Corant vs. VS Code
 
@@ -31,12 +31,15 @@ A diferenciação planejada não é competir com o ecossistema gigantesco do VS 
 - **TypeScript** — lógica do frontend
 - **Vite** — build/dev server
 - **Monaco Editor** — edição de texto/código
+- **xterm.js** — interface do terminal, conectada ao backend ConPTY no Windows
 
 Dependências principais podem ser consultadas em [`package.json`](package.json).
 
 ## Estado atual
 
-O projeto está sendo desenvolvido incrementalmente através de um roadmap de sete partes.
+As Partes 1–6 estão implementadas, assim como a API interna e os três plugins da Parte 7. O ecossistema de plugins externos e os recursos adicionais abaixo continuam planejados.
+
+Na tela inicial, é possível criar um projeto escolhendo nome e pasta de destino ou abrir uma pasta existente.
 
 ### ✅ Parte 1 — Explorer completo
 
@@ -150,44 +153,59 @@ A interface dos menus está em [`WorkspaceMenuBar.tsx`](src/components/editor/Wo
 
 O workspace utiliza **uma única sessão de terminal por vez**, iniciada no diretório do projeto atual. O painel integrado usa xterm.js e pode ser ocultado sem interromper o shell; oferece reinício, encerramento e redimensionamento.
 
-O backend Tauri/Rust usa ConPTY no Windows e encerra a árvore de processos ao fechar ou trocar o projeto.
+O backend Tauri/Rust usa PTY real via ConPTY e, nesta versão, o terminal requer Windows. A prioridade de shell é `pwsh.exe`, `powershell.exe`, `%COMSPEC%` e `cmd.exe`. O shell inicia na pasta do projeto; parar/reiniciar, fechar/trocar o projeto ou encerrar o app provoca o encerramento da sessão e de seus processos. Eventos carregam a identificação da sessão para descartar saída atrasada de sessões antigas.
 
-### ⏳ Parte 7 — Sistema de plugins
+### Parte 7 — API interna e plugins implementados
 
-A base da API v1 para plugins internos está implementada em [`src/plugins/api.ts`](src/plugins/api.ts) e [`src/plugins/host.ts`](src/plugins/host.ts). Inclui manifesto versionado, permissões declaradas e concedidas separadamente, ativação/desativação com cancelamento, comandos no menu Executar, acesso ao documento ativo e configurações locais por projeto/plugin. Edições preservam desfazer, autosave e recuperação, e rejeitam documentos ou versões antigos.
+A API v1 está em [`src/plugins/api.ts`](src/plugins/api.ts) e [`src/plugins/host.ts`](src/plugins/host.ts). Inclui manifesto versionado, permissões declaradas e concedidas separadamente, ativação/desativação com cancelamento, comandos, painéis, acesso ao documento ativo e configurações locais por projeto/plugin. Edições pela API preservam desfazer, autosave e recuperação e rejeitam documentos ou versões antigos.
 
-O catálogo em [src/plugins/builtins.ts](src/plugins/builtins.ts) inclui Copilot, Good Vibes e Commands, disponíveis pelo menu **Executar**. A API executa módulos internos confiáveis; instalação e isolamento de código externo continuam planejados. Preferências são locais por projeto; não armazenam chaves de API.
-
-Copilot conecta diretamente ao OpenRouter (chave mantida somente na memória do painel) ou ao Codex CLI no Windows. Para Codex, instale uma versão do CLI que suporte exec --ignore-user-config --ignore-rules, mantenha o executável nativo ou a instalação global do npm no PATH e clique **Entrar com Codex**. O login padrão abre o navegador automaticamente e o painel deve permanecer aberto até concluir. A alternativa **Entrar por código** mostra endereço e código; precisa estar habilitada na conta/workspace. Links e códigos são removidos ao concluir, cancelar ou falhar; uma nova tentativa gera uma nova sessão. O Corant usa seu próprio CODEX_HOME e o cofre de credenciais do sistema, sem aproveitar o login do CLI pessoal. A sessão do aplicativo exige login antes do primeiro pedido. O Codex executa em modo somente leitura numa pasta de trabalho do aplicativo; o documento ativo só é enviado quando solicitado. Alterações propostas exigem **Aplicar ao documento** e são rejeitadas se a versão mudou.
-
-Good Vibes oferece Crimson, Amanhecer e Meia-noite, incluindo editor e terminal. Commands salva receitas, seleciona arquivos/pastas e gera prévias Markdown, texto ou JSON, com conteúdo opcional; a exportação cria um arquivo novo na raiz do projeto. Limites: 500 arquivos, 1 MiB por arquivo de texto e 4 MiB de conteúdo por exportação.
-
-O sistema completo contempla:
-
-- API de plugins;
-- ciclo de vida;
-- instalação/remoção;
-- comandos;
-- settings;
-- integração de UI;
-- versionamento;
-- permissões e capacidades nativas.
-
-Plugins nativos implementados:
+O catálogo em [`src/plugins/builtins.ts`](src/plugins/builtins.ts) inclui os três plugins abaixo, disponíveis pelo menu **Executar**. São módulos internos confiáveis: instalação, remoção e isolamento de plugins externos ainda não estão implementados. As preferências locais dos plugins não armazenam chaves de API.
 
 #### Copilot
 
-Assistente de IA em que o usuário fornece sua própria chave de API e escolhe o provedor/modelo.
+Assistente com chat e dois provedores: **Codex** e **OpenRouter**. Antes de conectar, o painel apresenta **Provedor**, **Entrar com código** e **Fazer login**. O chat abre quando a autenticação do Codex é detectada ou após configurar o OpenRouter.
+
+- **Codex:** requer Windows e o Codex CLI no `PATH`, com suporte a `app-server`, descoberta de modelos e às políticas de aprovação usadas pelo Corant. O backend confere a política efetiva antes de enviar o pedido e rejeita configurações incompatíveis. O CLI deve ser instalado separadamente.
+- **Login Codex:** **Fazer login** abre o navegador; **Entrar com código** inicia o login por dispositivo, que precisa estar habilitado na conta. Mantenha o painel aberto até concluir. O Corant usa seu próprio `CODEX_HOME` e o cofre de credenciais do sistema, sem aproveitar automaticamente o login do CLI pessoal. Links e códigos são descartados ao concluir, cancelar ou falhar.
+- **Modelos Codex:** o dropdown consulta o catálogo do CLI, sem uma lista fixa no Corant. Atualiza aproximadamente a cada cinco minutos com o painel visível, ao recuperar o foco respeitando um intervalo mínimo e pelo botão de atualização. A disponibilidade depende do catálogo retornado pelo Codex; o Corant não instala atualizações do CLI.
+- **OpenRouter:** usa chave de API e modelo informados pelo usuário. A chave fica somente na memória do painel. Propostas de substituição do documento ativo exigem aplicação manual e verificação de versão.
+
+O Codex pode operar diretamente no projeto com três modos:
+
+| Modo | Comportamento |
+| --- | --- |
+| Solicitar aprovação | Sandbox somente leitura; solicita aprovação quando necessário para ampliar acesso. |
+| Aprovar por mim | Permite escrita no projeto e usa a revisão automática nativa do Codex para ações que exigem aprovação. |
+| Acesso completo | Executa sem sandbox e sem solicitar aprovações, após ativação explícita na sessão. |
+
+Aprovações são vinculadas à operação e descartadas no cancelamento. Antes de uma operação do agente, o editor salva alterações pendentes, bloqueia edições concorrentes e relê os arquivos ao terminar. Esses modos não se aplicam ao OpenRouter.
+
+O usuário pode anexar explicitamente o arquivo aberto. O histórico do chat fica na memória do painel, sem persistência entre sessões; as respostas são exibidas ao concluir, sem transmissão gradual de tokens na interface. A integração não reproduz todos os recursos do app ou da extensão oficial do Codex. Os pedidos de IA dependem de serviços online e enviam a eles o conteúdo necessário ao pedido.
 
 #### Good Vibes
 
-Plugin nativo de aparência/temas, com múltiplas opções de tema incluindo variações claras e escuras.
+Oferece os temas **Crimson**, **Amanhecer** e **Meia-noite**, incluindo interface, editor e terminal. A escolha é salva por projeto.
 
 #### Commands
 
-Sistema de comandos configuráveis por formulário para automatizar tarefas repetitivas sem exigir que o usuário programe um plugin.
+Catálogo de dez ferramentas locais para projetos de qualquer área:
 
-Exemplo de fluxo: escolher pasta inicial, selecionar arquivos/pastas, definir formato de saída (`md`, `txt`, `json` etc.) e decidir se os conteúdos dos arquivos serão incluídos.
+| Ferramenta | Função |
+| --- | --- |
+| Exportar árvore de pastas | Gera a estrutura visual, Markdown ou JSON de uma pasta, incluindo subpastas e pastas vazias. |
+| Juntar documentos | Reúne arquivos em uma exportação e permite salvar receitas de seleção. |
+| Inventário de arquivos | Lista caminhos, tipos e extensões em CSV ou JSON. |
+| Criar checklist | Converte linhas em itens de checklist Markdown. |
+| Contar texto | Conta palavras, caracteres, linhas e parágrafos. |
+| Maiúsculas e minúsculas | Converte a capitalização do texto. |
+| Limpar espaços | Remove espaços nas extremidades das linhas e reduz linhas vazias repetidas. |
+| Ordenar linhas | Ordena linhas em ordem crescente ou decrescente. |
+| Remover linhas duplicadas | Mantém a primeira ocorrência, com opção de ignorar maiúsculas/minúsculas. |
+| Localizar e substituir | Substitui ocorrências literais de um texto. |
+
+Abra **Executar → Commands — ferramentas**. Para exportar uma árvore diretamente, clique com o botão direito numa pasta do Explorer e escolha **Exportar árvore da pasta…**. Escolha o formato, confira a prévia e defina o nome e a extensão do arquivo. Links simbólicos não são percorridos.
+
+As ferramentas de texto recebem texto colado/digitado ou importado explicitamente do documento ativo; não alteram o original. Resultados podem ser copiados ou salvos em arquivos novos na raiz do projeto, sem sobrescrever existentes. A exportação da árvore permite escolher a extensão independentemente do formato. Limites incluem 10.000 itens na árvore/inventário, 500 arquivos e 4 MiB de conteúdo ao juntar documentos e 1 MiB por entrada nas ferramentas de texto.
 
 ## Recursos planejados além do roadmap principal
 
@@ -199,10 +217,10 @@ O produto completo também prevê:
 - importação/exportação de projetos e pastas em formatos de arquivo compactado comuns;
 - drag and drop para importação;
 - histórico/versionamento local;
-- configurações por workspace;
+- painel geral de configurações por workspace (preferências dos plugins já existem);
 - atalhos personalizáveis com importação/exportação;
 - projetos recentes e favoritos;
-- busca rápida por nome de arquivo;
+- paleta dedicada de abertura rápida de arquivos (a busca global por nome já existe);
 - integração Git via plugin da comunidade, em vez de depender de Git como funcionalidade nativa obrigatória.
 
 ## Menus de contexto
@@ -211,7 +229,7 @@ O menu de contexto padrão do WebView foi desativado. O Corant agora utiliza men
 
 Atualmente:
 
-- Explorer: ações de criação, abertura, renomeação, exclusão e atualização conforme o alvo clicado;
+- Explorer: ações de criação, abertura, renomeação, exclusão e atualização conforme o alvo clicado, além de exportar a árvore de uma pasta pelo Commands;
 - abas: fechar a aba, fechar outras, fechar à direita e fechar todas;
 - cliques fora do menu, `Esc`, redimensionamento e perda de foco fecham o menu;
 - o menu se reposiciona para permanecer dentro da janela;
@@ -223,7 +241,7 @@ O Corant utiliza Monaco Editor para edição textual.
 
 A configuração atual inclui, entre outros recursos:
 
-- tema escuro;
+- temas claros e escuros pelo Good Vibes;
 - minimapa;
 - layout automático;
 - smooth scrolling;
@@ -243,9 +261,10 @@ Corant
 └── Projeto
     ├── Barra de título
     ├── Menu
-    ├── Explorer
-    ├── Abas
-    ├── Editor Monaco
+    ├── Barra lateral: Explorer / busca global
+    ├── Abas e editor Monaco
+    ├── Painel de plugin
+    ├── Terminal integrado
     └── Barra de status
 ```
 
@@ -278,14 +297,12 @@ Corant/
 ├── src/                  # frontend React/TypeScript
 │   ├── app/              # estado principal da aplicação
 │   ├── components/       # componentes da interface
+│   ├── plugins/          # API, host e plugins internos
 │   ├── services/         # serviços do frontend, incluindo filesystem e recovery
 │   └── styles/           # estilos globais e do workspace
 ├── src-tauri/            # backend nativo Tauri/Rust
 ├── public/               # assets públicos, incluindo a identidade visual
-├── plugins/              # API e plugins internos
-├── tests/                # espaço reservado para testes
-├── docs/                 # documentação adicional
-├── scripts/              # scripts auxiliares
+├── tests/                # testes Playwright de interface e lógica
 ├── SPEC.md               # especificação de produto e técnica
 ├── package.json          # dependências e scripts
 └── README.md             # visão geral do projeto
@@ -297,7 +314,9 @@ Requisitos básicos:
 
 - Node.js/npm
 - Rust/Cargo
-- ambiente de desenvolvimento compatível com Tauri 2
+- ambiente de desenvolvimento compatível com Tauri 2; no Windows, ferramentas de compilação MSVC e WebView2
+
+O ambiente principal é Windows 11 com Rust MSVC. Terminal integrado e integração Codex estão implementados apenas para Windows nesta versão. Execute os comandos abaixo na raiz deste repositório, onde está o `package.json`.
 
 Instalar dependências:
 
@@ -305,7 +324,7 @@ Instalar dependências:
 npm install
 ```
 
-Executar o frontend:
+Executar apenas o frontend no navegador (as integrações nativas exigem o aplicativo Tauri):
 
 ```powershell
 npm run dev
@@ -323,13 +342,26 @@ Build do frontend:
 npm run build
 ```
 
-Testes automatizados dos menus e da fila de salvamento:
+Testes automatizados de interface, persistência, terminal, API e plugins:
 
 ```powershell
 npm test
 ```
 
 Os testes usam Playwright com Microsoft Edge instalado. Para usar outro navegador compatível, defina `PLAYWRIGHT_CHANNEL` (por exemplo, `chrome`). Os testes de interface executam o Monaco real com os assets instalados e simulam as chamadas nativas do Tauri; não substituem uma verificação manual no aplicativo desktop.
+
+Verificar e testar o backend Rust:
+
+```powershell
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+```
+
+Gerar o build desktop:
+
+```powershell
+npm run tauri build
+```
 
 ## Configuração Tauri
 
@@ -338,6 +370,8 @@ A configuração principal está em [`src-tauri/tauri.conf.json`](src-tauri/taur
 A aplicação atualmente é configurada como uma janela desktop redimensionável e usa os assets gerados no diretório de ícones do Tauri.
 
 O Explorer usa permissões explícitas do Tauri para as operações de filesystem que já fazem parte do núcleo atual: listar diretórios, ler e escrever arquivos de texto, criar pastas, renomear e excluir arquivos/pastas. Essas permissões são declaradas em [`src-tauri/capabilities/default.json`](src-tauri/capabilities/default.json) e continuam limitadas pelo scope dinâmico da pasta de projeto autorizada pelo Corant, em vez de conceder acesso irrestrito ao filesystem do computador.
+
+O scope do Explorer não restringe o shell local do terminal. No Copilot/Codex, o acesso depende do modo de sandbox/aprovação selecionado; **Acesso completo** permite operar fora da pasta do projeto. As permissões da API de plugins internos não constituem isolamento para código externo.
 
 O Vite também é configurado para ignorar `src-tauri` no watcher, evitando conflitos com arquivos gerados pelo Cargo durante o desenvolvimento.
 
@@ -359,6 +393,6 @@ Ao continuar o desenvolvimento do Corant:
 6. separar claramente funcionalidades atuais de funcionalidades planejadas;
 7. manter o workspace como centro da experiência.
 
-## Licença e status
+## Status
 
 O Corant está em desenvolvimento ativo e ainda não representa uma versão final de distribuição.

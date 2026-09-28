@@ -2,6 +2,8 @@ use std::path::Path;
 use tauri::Manager;
 use tauri_plugin_fs::FsExt;
 #[cfg(windows)]
+mod codex_agent;
+#[cfg(windows)]
 mod codex_models;
 mod native_plugins;
 mod terminal;
@@ -123,6 +125,7 @@ pub fn run() {
             native_plugins::plugin_export_text,
             native_plugins::copilot_request,
             native_plugins::copilot_cancel,
+            native_plugins::copilot_respond_approval,
             native_plugins::copilot_models,
             native_plugins::copilot_account
         ])
