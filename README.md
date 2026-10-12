@@ -2,7 +2,7 @@
 
 > Workspace desktop local-first para organizar arquivos, editar documentos e trabalhar em projetos de qualquer área.
 
-O **Corant** é um aplicativo desktop focado em trabalhar diretamente com projetos locais. A proposta é combinar gerenciamento de arquivos, edição de texto/código, terminal e plugins internos em um único workspace.
+O **Corant** é um aplicativo desktop focado em trabalhar diretamente com projetos locais. A proposta é combinar gerenciamento de arquivos, edição de texto/código, terminal e plugins em um único workspace.
 
 A filosofia do produto é simples: **abrir um projeto → ter as ferramentas integradas → começar a trabalhar**.
 
@@ -14,7 +14,7 @@ O Corant reúne ferramentas para projetos e tarefas do dia a dia; seu uso não s
 - **Sem conta obrigatória:** o núcleo não depende de uma conta online.
 - **Sem backend obrigatório:** o produto principal não depende de um servidor ou banco de dados central.
 - **Projeto como unidade principal:** o usuário abre ou cria um projeto e trabalha dentro dele.
-- **Extensível:** a API interna e três plugins já estão implementados; instalação de plugins externos continua planejada.
+- **Extensível:** a API v1, três plugins internos e carregamento de plugins externos confiáveis estão implementados.
 
 ### Corant vs. VS Code
 
@@ -37,7 +37,7 @@ Dependências principais podem ser consultadas em [`package.json`](package.json)
 
 ## Estado atual
 
-As Partes 1–6 estão implementadas, assim como a API interna e os três plugins da Parte 7. O ecossistema de plugins externos e os recursos adicionais abaixo continuam planejados.
+As Partes 1–6 estão implementadas, assim como a API interna e os três plugins da Parte 7. Plugins externos podem ser instalados por pasta e gerenciados no workspace; marketplace e isolamento permanecem planejados.
 
 Na tela inicial, é possível criar um projeto escolhendo nome e pasta de destino ou abrir uma pasta existente.
 
@@ -137,7 +137,7 @@ Inclui:
 - `Seleção`: selecionar linha, expandir/reduzir seleção e selecionar ocorrências;
 - `Exibir`: Explorer, busca global, barra lateral, minimapa, quebra de linha, navegação entre abas e atualização do Explorer;
 - `Ajuda`: guia local de uso/atalhos e informações da versão;
-- `Terminal`: abre o terminal integrado; `Executar` lista comandos registrados por plugins internos quando disponíveis. O executor de tarefas continua planejado.
+- `Terminal`: abre o terminal integrado; `Executar` lista comandos registrados por plugins e oferece o gerenciador de plugins externos. O executor de tarefas continua planejado.
 
 Salvar tudo inclui arquivos carregados com alterações, mesmo em abas inativas. As gravações são serializadas por arquivo para evitar conflitos entre autosave e salvamento manual. Abrir/fechar projeto e sair (inclusive pelo botão da janela) oferecem salvar alterações pendentes ou cancelar; uma falha de salvamento mantém o workspace aberto. Cada arquivo mantém seu próprio histórico de desfazer durante a sessão do projeto.
 
@@ -155,11 +155,19 @@ O workspace utiliza **uma única sessão de terminal por vez**, iniciada no dire
 
 O backend Tauri/Rust usa PTY real via ConPTY e, nesta versão, o terminal requer Windows. A prioridade de shell é `pwsh.exe`, `powershell.exe`, `%COMSPEC%` e `cmd.exe`. O shell inicia na pasta do projeto; parar/reiniciar, fechar/trocar o projeto ou encerrar o app provoca o encerramento da sessão e de seus processos. Eventos carregam a identificação da sessão para descartar saída atrasada de sessões antigas.
 
-### Parte 7 — API interna e plugins implementados
+### Parte 7 — API e plugins internos/externos
 
 A API v1 está em [`src/plugins/api.ts`](src/plugins/api.ts) e [`src/plugins/host.ts`](src/plugins/host.ts). Inclui manifesto versionado, permissões declaradas e concedidas separadamente, ativação/desativação com cancelamento, comandos, painéis, acesso ao documento ativo e configurações locais por projeto/plugin. Edições pela API preservam desfazer, autosave e recuperação e rejeitam documentos ou versões antigos.
 
-O catálogo em [`src/plugins/builtins.ts`](src/plugins/builtins.ts) inclui os três plugins abaixo, disponíveis pelo menu **Executar**. São módulos internos confiáveis: instalação, remoção e isolamento de plugins externos ainda não estão implementados. As preferências locais dos plugins não armazenam chaves de API.
+O catálogo em [`src/plugins/builtins.ts`](src/plugins/builtins.ts) inclui os três plugins abaixo, disponíveis pelo menu **Executar**. Além deles, o gerenciador permite instalar, remover, ativar e desativar módulos externos confiáveis. Isolamento de código externo ainda não está implementado. As preferências locais dos plugins não armazenam chaves de API.
+
+#### Plugins externos
+
+Abra **Executar → Gerenciar plugins…**. O Corant descobre pacotes em `app_data_dir()/plugins/<id>/`, lê `manifest.json`, importa o entrypoint ES `.js`/`.mjs` e ativa pelo mesmo `PluginHost` usado pelos plugins internos. O caminho da pasta aparece no gerenciador. Instale escolhendo uma pasta ou coloque o pacote ali manualmente e atualize o catálogo.
+
+Plugins novos começam desativados. A ativação é autorizada por projeto e vinculada ao manifesto/código; alterações exigem nova aprovação. Desativar remove comandos, painéis e subscriptions, e remover também exclui a cópia instalada. O código roda no mesmo ambiente do Corant, **sem sandbox**: as permissões da API não isolam código arbitrário. Use apenas plugins confiáveis.
+
+O formato inicial usa um entrypoint autossuficiente, sem resolução de imports relativos ou pacotes npm. Veja o [guia de plugins externos](docs/PLUGINS.md) e o [exemplo instalável](examples/plugins/example.word-count).
 
 #### Copilot
 
@@ -211,9 +219,8 @@ As ferramentas de texto recebem texto colado/digitado ou importado explicitament
 
 O produto completo também prevê:
 
-- editor de imagens integrado;
-- formas básicas, texto, cores, gradientes e camadas;
-- preview por tipo de arquivo;
+- evolução do editor de imagens, incluindo projetos de camadas persistentes e gerenciamento de cor;
+- previews adicionais por tipo de arquivo, como Markdown renderizado (imagens e SVG já têm prévia);
 - importação/exportação de projetos e pastas em formatos de arquivo compactado comuns;
 - drag and drop para importação;
 - histórico/versionamento local;
@@ -251,6 +258,24 @@ A configuração atual inclui, entre outros recursos:
 - comportamento de cursor suave.
 
 A linguagem do arquivo é inferida principalmente pela extensão. Extensões desconhecidas podem ser abertas como texto puro.
+
+## Editor e visualização de imagens
+
+Abrir um arquivo PNG, JPG/JPEG, GIF, WebP, AVIF, BMP, ICO, TIFF/TIF ou SVG pelo Explorer mostra sua prévia na própria aba, com fundo quadriculado para transparência, dimensões, ajuste à tela e tamanho original. O limite de leitura é 32 MiB por imagem (80 MiB para TIFF); arquivos inválidos ou não suportados pelo WebView exibem uma mensagem de erro.
+
+SVG permite alternar entre **Editar SVG** e **Visualizar SVG**, preservando o fluxo de autosave e recuperação do editor. A prévia usa a imagem isolada em um elemento `img`, sem executar scripts do SVG. O botão **Editar imagem** abre o estúdio integrado:
+
+- recorte por arraste, rotação, espelhamento e redimensionamento com proporção;
+- pincel, borracha, retângulo, elipse, triângulo, pentágono, seta e texto;
+- cores, gradientes, espessura e opacidade;
+- camadas com seleção, movimento, visibilidade, duplicação, exclusão e ordenação;
+- brilho, contraste, saturação, preto e branco e sépia;
+- zoom, comparação com a base e histórico de até 30 estados, limitado também por memória;
+- exportação de cópias PNG, JPEG, WebP e TIFF na raiz do projeto, sem sobrescrever arquivos.
+
+Rascunhos de imagens permanecem ao trocar de aba. Fechar abas/projeto ou sair com edições não exportadas solicita confirmação; exportações em andamento bloqueiam operações que poderiam invalidá-las. As camadas existem apenas na sessão atual: as cópias exportadas são imagens rasterizadas, sem camadas editáveis. Transformações geométricas unem as camadas e podem ser desfeitas. Não há recuperação de imagens após crash nesta versão.
+
+O editor trabalha em RGBA de 8 bits, com até 16 megapixels e quatro imagens em edição. O TIFF é decodificado no Rust: primeira página, RGB/tons de cinza de 8 ou 16 bits e CMYK de 8 bits. Imagens de 16 bits são convertidas para 8 bits; metadados e perfis de cor não são preservados. SVG e animações são rasterizados ao entrar no editor visual. O TIFF exportado contém uma única página RGBA de 8 bits.
 
 ## Arquitetura do workspace
 
@@ -297,7 +322,7 @@ Corant/
 ├── src/                  # frontend React/TypeScript
 │   ├── app/              # estado principal da aplicação
 │   ├── components/       # componentes da interface
-│   ├── plugins/          # API, host e plugins internos
+│   ├── plugins/          # API, host, gerenciador e plugins internos
 │   ├── services/         # serviços do frontend, incluindo filesystem e recovery
 │   └── styles/           # estilos globais e do workspace
 ├── src-tauri/            # backend nativo Tauri/Rust
@@ -369,7 +394,7 @@ A configuração principal está em [`src-tauri/tauri.conf.json`](src-tauri/taur
 
 A aplicação atualmente é configurada como uma janela desktop redimensionável e usa os assets gerados no diretório de ícones do Tauri.
 
-O Explorer usa permissões explícitas do Tauri para as operações de filesystem que já fazem parte do núcleo atual: listar diretórios, ler e escrever arquivos de texto, criar pastas, renomear e excluir arquivos/pastas. Essas permissões são declaradas em [`src-tauri/capabilities/default.json`](src-tauri/capabilities/default.json) e continuam limitadas pelo scope dinâmico da pasta de projeto autorizada pelo Corant, em vez de conceder acesso irrestrito ao filesystem do computador.
+O Explorer usa permissões explícitas do Tauri para as operações de filesystem que já fazem parte do núcleo atual: listar diretórios, ler e escrever arquivos de texto, ler imagens e seus metadados, criar pastas, renomear e excluir arquivos/pastas. Essas permissões são declaradas em [`src-tauri/capabilities/default.json`](src-tauri/capabilities/default.json) e continuam limitadas pelo scope dinâmico da pasta de projeto autorizada pelo Corant, em vez de conceder acesso irrestrito ao filesystem do computador.
 
 O scope do Explorer não restringe o shell local do terminal. No Copilot/Codex, o acesso depende do modo de sandbox/aprovação selecionado; **Acesso completo** permite operar fora da pasta do projeto. As permissões da API de plugins internos não constituem isolamento para código externo.
 

@@ -1,0 +1,11 @@
+{
+  "id": "example.word-count",
+  "name": "Contagem de palavras",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entrypoint": "index.js",
+  "permissions": ["commands.register", "editor.read", "ui.panel"],
+  "commands": [
+    { "id": "example.word-count.show", "title": "Contar palavras do documento" }
+  ]
+}

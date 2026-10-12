@@ -22,6 +22,12 @@ struct Context {
 #[derive(Default)]
 pub struct NativePlugins(Mutex<Context>);
 impl NativePlugins {
+    pub(crate) fn with_project<T>(&self, path: &str, work: impl FnOnce(&Path) -> Result<T, String>) -> Result<T, String> {
+        let root = self.project(path)?;
+        let guard = self.0.lock().map_err(|_| "Estado indisponível.")?;
+        if guard.closed || guard.project.as_ref() != Some(&root) { return Err("O projeto mudou.".into()); }
+        work(&root)
+    }
     pub fn activate(&self, project: PathBuf) {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if state.project.as_ref() != Some(&project) {
@@ -56,7 +62,7 @@ fn main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     }
     Ok(())
 }
-fn relative_file(root: &Path, path: &str) -> Result<PathBuf, String> {
+pub(crate) fn relative_file(root: &Path, path: &str) -> Result<PathBuf, String> {
     if path.is_empty()
         || path
             .split(['/', '\\'])
@@ -104,6 +110,10 @@ pub async fn plugin_read_text(
     .map_err(|_| "Falha ao ler arquivo.".to_string())?
 }
 fn export_file(root: &Path, name: &str, text: &str) -> Result<(), String> {
+    if text.len() > 8 * 1024 * 1024 { return Err("A exportação excede 8 MiB.".into()); }
+    export_bytes(root, name, text.as_bytes())
+}
+pub(crate) fn export_bytes(root: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     let (stem, extension) = name
         .rsplit_once('.')
         .ok_or("Informe um nome e uma extensão para o arquivo.")?;
@@ -132,8 +142,8 @@ fn export_file(root: &Path, name: &str, text: &str) -> Result<(), String> {
     {
         return Err("Use um nome de arquivo válido, sem pastas, e uma extensão de até 16 letras ou números.".into());
     }
-    if text.len() > 8 * 1024 * 1024 {
-        return Err("A exportação excede 8 MiB.".into());
+    if bytes.len() > 80 * 1024 * 1024 {
+        return Err("A exportação excede 80 MiB.".into());
     }
     let path = root.join(name);
     let mut file = std::fs::OpenOptions::new()
@@ -144,7 +154,7 @@ fn export_file(root: &Path, name: &str, text: &str) -> Result<(), String> {
             "Não foi possível criar a exportação. Verifique se o nome já existe.".to_string()
         })?;
     if file
-        .write_all(text.as_bytes())
+        .write_all(bytes)
         .and_then(|_| file.sync_all())
         .is_err()
     {

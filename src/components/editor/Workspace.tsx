@@ -1,5 +1,5 @@
 import "../../styles/plugins.css";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { editor } from "monaco-editor";
 import type { Monaco } from "@monaco-editor/react";
@@ -7,7 +7,8 @@ import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { MonacoEditor } from "./monaco/MonacoEditor";
-import { ImagePreview } from "./ImagePreview";
+import { ImageSurface } from "./image/ImageEditor";
+import { ImageSessions } from "../../services/imageEditor";
 import { imageMimeType } from "../../services/projectImages";
 import { ExplorerNameDialog } from "./ExplorerNameDialog";
 import { GlobalSearchPanel } from "./GlobalSearchPanel";
@@ -17,6 +18,8 @@ import { createFileSaveQueue } from "../../services/fileSaveQueue";
 import { runEditorCommand } from "../../services/editorCommands";
 import { WorkspaceTerminal } from "../../services/workspaceTerminal";
 import { useWorkspacePlugins } from "../../plugins/useWorkspacePlugins";
+import { ExternalPluginsPanel } from "../../plugins/ExternalPluginsPanel";
+import { PluginPanelView } from "../../plugins/PluginPanelView";
 import { affectsProjectPath, remapProjectPath } from "../../services/projectPaths";
 import "../../styles/menus.css";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
@@ -198,6 +201,15 @@ function disposeObsoleteModel(model: editor.ITextModel) {
 }
 
 export function Workspace({ projectName, projectPath, onBackToHome, onOpenProject }: WorkspaceProps) {
+  const [imageSessions] = useState(() => new ImageSessions());
+  useSyncExternalStore(imageSessions.subscribe, imageSessions.snapshot);
+  async function confirmImageDiscard(matches: (path: string) => boolean) {
+    if (imageSessions.hasBusy()) { reportError("Aguarde a exportação da imagem terminar."); return false; }
+    const unsaved = imageSessions.dirtyPaths().filter(matches);
+    return !unsaved.length || await confirm(`Há ${unsaved.length} imagem(ns) com edições não exportadas. Exporte uma cópia para guardar o resultado. Descartar essas edições?`, {
+      title: "Edições de imagem", kind: "warning", okLabel: "Descartar edições", cancelLabel: "Voltar ao editor",
+    });
+  }
   const terminalRef = useRef<WorkspaceTerminal | null>(null);
   useEffect(() => {
     const terminal = new WorkspaceTerminal(projectPath);
@@ -229,6 +241,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   const [wordWrap, setWordWrap] = useState(false);
   const [minimap, setMinimap] = useState(true);
   const [helpPage, setHelpPage] = useState<"about" | "help" | null>(null);
+  const [pluginManagerOpen, setPluginManagerOpen] = useState(false);
   const [editorInstance, setEditorInstance] = useState<editor.IStandaloneCodeEditor | null>(null);
   const [isLeaving, setIsLeaving] = useState(false);
   const [terminalVisible, setTerminalVisible] = useState(false);
@@ -411,12 +424,14 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     const pathsToClose = new Set(targets);
     try {
       return await runPathMutation((path) => pathsToClose.has(path), async () => {
+        if (!await confirmImageDiscard((path) => pathsToClose.has(path))) return false;
         const discarded = new Set<string>();
         for (const path of targets) {
           if (!await confirmTabClose(path)) return false;
           if (contentsRef.current[path]?.content !== originalsRef.current[path]) discarded.add(path);
         }
         // Commit only after every confirmation; canceling a batch discards nothing.
+        imageSessions.remove((path) => pathsToClose.has(path));
         for (const path of discarded) clearRecoverySnapshot(projectPath, path);
         removeLoadedPaths((path) => discarded.has(path));
         const activeIndex = activeFilePath ? openTabPaths.indexOf(activeFilePath) : -1;
@@ -617,6 +632,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }
 
   async function runPathMutation<T>(matches: (path: string) => boolean, operation: () => Promise<T>) {
+    if (imageSessions.hasBusy()) throw new Error("Aguarde a exportação da imagem terminar.");
     if (mutationRef.current || leavingRef.current) throw new Error("Aguarde a operação atual terminar.");
     mutationRef.current = true;
     setIsMutating(true);
@@ -677,7 +693,9 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }
 
   function runWorkspaceAgent(work: (signal: AbortSignal) => Promise<string>, signal: AbortSignal): Promise<string> {
+    if (imageSessions.hasBusy() || imageSessions.dirtyPaths().length) return Promise.reject(new Error("Exporte as edições de imagem antes de executar o agente."));
     if (mutationRef.current || leavingRef.current || signal.aborted) return Promise.reject(new Error("Workspace ocupado ou operação cancelada."));
+    imageSessions.remove(() => true);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
@@ -745,6 +763,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
   }
 
   async function leaveWorkspace(action: () => void | Promise<void>) {
+    if (!await confirmImageDiscard(() => true)) return;
     if (agentTask.current) {
       agentTask.current.controller.abort();
       await agentTask.current.done.catch(reportError);
@@ -1026,6 +1045,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
           const newPath = await renameProjectEntry(oldPath, name);
           if (newPath === oldPath) return;
           const remap = (path: string) => remapProjectPath(path, oldPath, newPath, directory);
+          imageSessions.rename(remap);
           moveRecoverySnapshotsForPath(projectPath, oldPath, newPath, directory);
           disposeModelsForPaths(matches);
           contentsRef.current = Object.fromEntries(Object.entries(contentsRef.current).map(([path, content]) => [
@@ -1074,7 +1094,9 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
           { title: "Excluir item", kind: "warning", okLabel: "Excluir", cancelLabel: "Cancelar" },
         );
         if (!confirmed) return;
+        if (!await confirmImageDiscard(matches)) return;
         await deleteProjectEntry(target);
+        imageSessions.remove(matches);
         clearRecoverySnapshotsForPath(projectPath, target.path, directory);
         removeLoadedPaths(matches);
         const nextTabs = openTabPaths.filter((path) => !matches(path));
@@ -1162,12 +1184,10 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
       { id: "previous-tab", label: "Aba anterior", shortcut: "Ctrl+Shift+Tab", disabled: openTabs.length < 2, onSelect: () => switchTab(-1) },
       { id: "refresh", label: "Atualizar Explorer", onSelect: () => setRefreshKey((value) => value + 1) },
     ] },
-    { label: "Executar", items: plugins.commands.length ? plugins.commands.map((command) => ({
+    { label: "Executar", items: [{ id: "manage-plugins", label: "Gerenciar plugins…", disabled: !plugins.externalManager, onSelect: () => { plugins.closePanel(); setPluginManagerOpen(true); } }, ...plugins.commands.map((command) => ({
       id: command.id, label: command.title, disabled: isLeaving || isMutating,
-      onSelect: () => plugins.executeCommand(command.id),
-    })) : [
-      { id: "run-unavailable", label: "Execução ainda não disponível", disabled: true, onSelect: () => undefined },
-    ] },
+      onSelect: () => { setPluginManagerOpen(false); return plugins.executeCommand(command.id); },
+    }))] },
     { label: "Terminal", items: [
       { id: "toggle-terminal", label: terminalVisible ? "Ocultar terminal" : "Mostrar terminal", shortcut: "Ctrl+`", checked: terminalVisible, disabled: !isTauri(), onSelect: toggleTerminal },
     ] },
@@ -1181,6 +1201,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
     function handleShortcut(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing || nameDialog || helpPage || isLeaving || isMutating) return;
       const mod = event.ctrlKey || event.metaKey;
+      if (mod && ["s", "z", "y"].includes(event.key.toLowerCase()) && (event.target as HTMLElement).closest?.(".image-editor")) return;
       const key = event.key.toLowerCase();
       if (isTauri() && mod && !event.shiftKey && !event.altKey && key === "`") {
         event.preventDefault(); event.stopPropagation(); toggleTerminal(); return;
@@ -1225,7 +1246,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
         <div className="workspace-titlebar-actions">
           <span className={`save-indicator save-indicator-${saveState}`}>
             {saveState === "saving" && "● Salvando..."}
-            {saveState === "saved" && (dirtyPaths.size ? "● Alterações pendentes" : "● Salvo")}
+            {saveState === "saved" && ((dirtyPaths.size || imageSessions.dirtyPaths().length) ? "● Alterações pendentes" : "● Salvo")}
             {saveState === "error" && "● Erro ao salvar"}
           </span>
         </div>
@@ -1354,7 +1375,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
           <div className="editor-tabs" role="tablist" aria-label="Arquivos abertos">
             {openTabs.map((file) => {
               const isActive = file.path === activeFilePath;
-              const isDirty = dirtyPaths.has(file.path);
+              const isDirty = dirtyPaths.has(file.path) || imageSessions.dirty(file.path);
 
               return (
                 <div
@@ -1396,7 +1417,7 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
                 <div className="editor-breadcrumbs"><span>{projectName}</span><span>/</span><span>{activeFile.relativePath}</span></div>
                 {activeImageType === "image/svg+xml" && <button className="image-view-toggle" onClick={() => setSvgCodePath(activeFile.path)}>Editar SVG</button>}
               </div>
-              <ImagePreview key={`${activeFile.path}:${refreshKey}`} path={activeFile.path} name={activeFile.name} source={activeImageType === "image/svg+xml" ? fileContents[activeFile.path]?.content : undefined} />
+              <ImageSurface key={`${activeFile.path}:${refreshKey}`} sessions={imageSessions} projectPath={projectPath} relativePath={activeFile.relativePath} path={activeFile.path} name={activeFile.name} source={activeImageType === "image/svg+xml" ? fileContents[activeFile.path]?.content : undefined} onExport={() => setRefreshKey(value => value + 1)} />
             </>
           ) : activeFile && activeContent ? (
             <>
@@ -1457,7 +1478,8 @@ export function Workspace({ projectName, projectPath, onBackToHome, onOpenProjec
             </footer>
           )}
         </section>
-        {plugins.activePanel && <aside className="plugin-panel" key={plugins.activePanelId} aria-label={plugins.activePanel.title}><header><strong>{plugins.activePanel.title}</strong><button aria-label="Fechar plugin" onClick={plugins.closePanel}>×</button></header>{plugins.activePanel.render()}</aside>}
+        {pluginManagerOpen && plugins.externalManager && <aside className="plugin-panel" aria-label="Plugins externos"><header><strong>Plugins externos</strong><button aria-label="Fechar gerenciador de plugins" onClick={() => setPluginManagerOpen(false)}>×</button></header><ExternalPluginsPanel manager={plugins.externalManager}/></aside>}
+        {!pluginManagerOpen && plugins.activePanel && <aside className="plugin-panel" key={plugins.activePanelId} aria-label={plugins.activePanel.title}><header><strong>{plugins.activePanel.title}</strong><button aria-label="Fechar plugin" onClick={plugins.closePanel}>×</button></header><PluginPanelView key={plugins.activePanelId} panel={plugins.activePanel}/></aside>}
       </section>
 
       {contextMenu && (

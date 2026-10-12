@@ -81,3 +81,6 @@
 .commands-result h3 { margin: 0; font-size: 14px; }
 .commands-result > textarea { white-space: pre; font-family: ui-monospace, Consolas, monospace; }
 .commands-output-name { display: grid; grid-template-columns: minmax(0, 1fr) 88px; gap: 8px; }
+
+.external-plugin-card { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--plugin-border); border-radius: 6px; overflow-wrap: anywhere; }
+.external-plugin-card ul { padding-left: 18px; font-size: 12px; }

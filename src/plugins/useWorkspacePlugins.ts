@@ -8,6 +8,7 @@ import { createPluginEditorBridge, type PluginEditorState } from "./editorBridge
 import { PluginHost } from "./host";
 import { createPluginSettings } from "./settings";
 import { listProjectEntries } from "../services/projectFilesystem";
+import { ExternalPluginManager } from "./externalPlugins";
 
 let previousWorkspaceCleanup: Promise<void> = Promise.resolve();
 
@@ -19,6 +20,8 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
   const [panels, setPanels] = useState<Record<string, PluginPanel>>({});
   const [activePanelId, setActivePanelId] = useState<string | null>(null);
   const hostRef = useRef<PluginHost | null>(null);
+  const externalRef = useRef<ExternalPluginManager | null>(null);
+  const [externalManager, setExternalManager] = useState<ExternalPluginManager | null>(null);
   const listeners = useRef(new Set<(document: EditorDocument | null) => void>());
   const [commands, setCommands] = useState<readonly PluginCommand[]>([]);
   const bridge = useRef(createPluginEditorBridge(() => latest.current.editorState)).current;
@@ -60,6 +63,9 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
       codexAccount: (action, signal, output) => codexAccount(project.path, action, signal, output),
     });
     hostRef.current = host;
+    const external = new ExternalPluginManager(host, project.path);
+    externalRef.current = external;
+    setExternalManager(external);
     const subscription = host.onDidChangeCommands(() => { if (!disposed) setCommands(host.listCommands()); });
     setCommands([]);
     void previousWorkspaceCleanup.then(() => {
@@ -67,13 +73,15 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
       for (const { definition, grants } of builtinPlugins) {
         void host.activate(definition, grants).catch((error) => { if (!disposed) latest.current.report(error); });
       }
+      void external.refresh().catch((error) => { if (!disposed) latest.current.report(error); });
     });
     return () => {
       disposed = true;
       hostRef.current = null;
+      externalRef.current = null;
       subscription.dispose();
       // Revoke immediately and finish deactivation before activating the next workspace.
-      previousWorkspaceCleanup = Promise.all([previousWorkspaceCleanup, host.dispose()]).then(() => {});
+      previousWorkspaceCleanup = Promise.all([previousWorkspaceCleanup, external.dispose(), host.dispose()]).then(() => {});
     };
   }, [project.path, bridge, generation]);
 
@@ -97,10 +105,10 @@ export function useWorkspacePlugins(project: ProjectInfo, editorState: PluginEdi
   }, [bridge, editorState.instance, editorState.path, editorState.modelUri]);
 
   return {
-    commands, theme, activePanel: activePanelId ? panels[activePanelId] : null, activePanelId,
+    commands, theme, activePanel: activePanelId ? panels[activePanelId] : null, activePanelId, externalManager,
     closePanel: () => setActivePanelId(null),
     restart: () => setGeneration((value) => value + 1),
     executeCommand: (id: string) => hostRef.current?.executeCommand(id),
-    dispose: () => hostRef.current?.dispose(),
+    dispose: () => Promise.all([externalRef.current?.dispose(), hostRef.current?.dispose()]).then(() => {}),
   };
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { MAX_IMAGE_BYTES, readProjectImage } from "../../services/projectImages";
+import { MAX_IMAGE_BYTES, imageMimeType, readProjectImage } from "../../services/projectImages";
 import "../../styles/imagePreview.css";
 
-type Props = { path: string; name: string; source?: string };
+type Props = { path: string; name: string; source?: string; projectPath?: string; relativePath?: string; onEdit?: () => void };
 
-export function ImagePreview({ path, name, source }: Props) {
+export function ImagePreview({ path, name, source, projectPath, relativePath, onEdit }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [dimensions, setDimensions] = useState("");
@@ -19,9 +19,10 @@ export function ImagePreview({ path, name, source }: Props) {
     setDimensions("");
     async function load() {
       try {
-        const blob = source === undefined ? await readProjectImage(path) : new Blob([source], { type: "image/svg+xml" });
+        const blob = source === undefined ? await readProjectImage(path, projectPath, relativePath) : new Blob([source], { type: "image/svg+xml" });
         if (cancelled) return;
-        if (blob.size > MAX_IMAGE_BYTES) throw new Error("A imagem excede o limite de 32 MiB.");
+        const limit = imageMimeType(path) === "image/tiff" ? 80 * 1024 * 1024 : MAX_IMAGE_BYTES;
+        if (blob.size > limit) throw new Error(`A imagem excede o limite de ${limit / 1024 / 1024} MiB.`);
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
       } catch (cause) {
@@ -33,10 +34,11 @@ export function ImagePreview({ path, name, source }: Props) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [path, source, attempt]);
+  }, [path, source, attempt, projectPath, relativePath]);
 
   return <section className="image-preview" aria-label={`Visualização de ${name}`}>
     <div className="image-preview-controls">
+      {onEdit && <button type="button" onClick={onEdit}>Editar imagem</button>}
       <button type="button" aria-pressed={!actualSize} onClick={() => setActualSize(false)}>Ajustar à tela</button>
       <button type="button" aria-pressed={actualSize} onClick={() => setActualSize(true)}>Tamanho original</button>
       <span>{dimensions}</span>

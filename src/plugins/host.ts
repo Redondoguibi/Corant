@@ -33,7 +33,7 @@ type Entry = {
 };
 type RegisteredCommand = PluginCommand & { entry: Entry; handler: CommandHandler };
 
-function validateManifest(value: PluginManifest): PluginManifest {
+export function validateManifest(value: PluginManifest): PluginManifest {
   const invalid = () => new PluginApiError("INVALID_MANIFEST", "Manifesto de plugin inválido.");
   if (!value || typeof value !== "object") throw invalid();
   if (value.apiVersion !== PLUGIN_API_VERSION) throw new PluginApiError("INCOMPATIBLE_API", "Versão da API de plugins incompatível.");
@@ -112,6 +112,7 @@ export class PluginHost {
     catch (cause) {
       await this.cleanup(entry);
       entry.phase = "failed";
+      this.changed();
       throw pluginError(cause);
     }
   }
@@ -134,6 +135,7 @@ export class PluginHost {
     return [...this.commands.values()].filter(({ entry }) => entry.phase === "active")
       .map(({ id, title }) => ({ id, title }));
   }
+  status(pluginId: string): Phase | undefined { return this.entries.get(pluginId)?.phase; }
   onDidChangeCommands(listener: () => void): Disposable {
     if (this.disposed) throw inactive();
     this.listeners.add(listener);
@@ -194,6 +196,7 @@ export class PluginHost {
         catch (cause) { this.notify(cause, entry); }
       }
       entry.phase = "inactive";
+      this.changed();
     })();
     return entry.cleanup;
   }

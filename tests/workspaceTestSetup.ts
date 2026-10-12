@@ -31,6 +31,7 @@ export async function setupWorkspace(page: Page) {
     (window as any).isTauri = true;
     mockWindows("main");
     mockIPC((command: string, args: any) => {
+      if (command === "external_plugins_list") return { directory: "/app/plugins", plugins: [] };
       if (command === "plugin:dialog|open") return state.projectPicker;
       if (command === "plugin:dialog|message") {
         state.dialogs.push(args.title);

@@ -236,18 +236,19 @@ Supported mappings currently include at least:
 
 A native/basic image editor is part of the intended Corant product, not merely a plugin.
 
-Planned capabilities:
+Current capabilities:
 
-- basic shapes such as square, triangle, circle, pentagon and arrows
-- text
-- colors
-- gradients
-- layers
-- image editing inside the workspace
+- crop, rotate, flip and resize with aspect ratio;
+- brush, eraser, geometric shapes, arrows and text;
+- colors, gradients and layer opacity;
+- movable, reorderable, hideable, duplicable layers;
+- base brightness, contrast, saturation, grayscale and sepia;
+- zoom, comparison and bounded undo/redo history;
+- create-new PNG, JPEG, WebP and TIFF exports in the project root.
 
-The image editor is intended to make Corant useful not only for source code but also for technical/creative project assets.
+Drafts survive tab switches during the workspace session. Closing dirty image tabs or leaving the workspace requires confirmation; export failures preserve drafts. Image exports do not overwrite the original. Geometry changes flatten the composition but remain undoable. Editable layer documents and image crash recovery are not implemented.
 
-The image editor is not yet part of the current implementation represented by this specification's initial repository state.
+TIFF/TIF decoding and encoding run on the Rust backend with explicit size limits and project validation. The first TIFF page is supported for RGB/grayscale 8/16-bit and CMYK 8-bit; orientation is applied. The editor converts to 8-bit RGBA and does not preserve metadata/ICC profiles. Exported TIFF is a single RGBA8 page. SVG and animations are rasterized for visual editing. Editor limits: 16 megapixels, 16,384 pixels per dimension, four open image sessions, 100 layers and up to 30 history states with a bitmap memory bound per session.
 
 ---
 
@@ -506,17 +507,27 @@ The plugin system should define:
 
 ### Security philosophy
 
-**Current API foundation:** `src/plugins/api.ts` defines API version 1 for explicitly registered, trusted built-in modules. `PluginHost` validates manifests (namespaced IDs, stable `major.minor.patch` versions, API version and declared commands), checks host grants independently of requested permissions, and revokes contexts, commands and subscriptions on deactivation, activation failure or workspace disposal. Asynchronous lifecycle hooks have a time limit and receive cooperative cancellation through the context's `AbortSignal`.
+**Current API foundation:** `src/plugins/api.ts` defines API version 1 for trusted built-in and external modules. `PluginHost` validates manifests (namespaced IDs, stable `major.minor.patch` versions, API version and declared commands), checks host grants independently of requested permissions, and revokes contexts, commands and subscriptions on deactivation, activation failure or workspace disposal. Asynchronous lifecycle hooks have a time limit and receive cooperative cancellation through the context's `AbortSignal`.
 
 The API currently provides project metadata (`workspace.read`), active-document snapshots and change events (`editor.read`), version-checked replacement through Monaco (`editor.write`), declared command registration (`commands.register`), and project/plugin-scoped JSON preferences (`settings.read`/`settings.write`). Commands appear in the existing Run menu. Settings are limited to 64 KiB per value and must not store secrets. Built-in registration is explicit in `src/plugins/builtins.ts`; Copilot, Good Vibes and Commands are registered built-ins. Panel registration, themes, bounded project text reads/create-new exports and cancellable AI requests have explicit API permissions.
 
-These modules share the application's JavaScript environment. Permission checks govern calls through the API and are not an isolation boundary for arbitrary code. External plugin loading/installing, a sandbox, secret storage, terminal capabilities and arbitrary UI contributions remain planned. Tauri capabilities are unchanged by this API foundation.
+These modules share the application's JavaScript environment. Permission checks govern calls through the API and are not an isolation boundary for arbitrary code. External plugin discovery/install/remove/enable/disable is implemented using the same host. A sandbox, secret storage, terminal capabilities and arbitrary UI contributions remain planned. Tauri capabilities are unchanged by this API foundation.
 
 Plugins should not automatically receive unlimited native/system access.
 
 The design should use explicit permissions/capabilities so a plugin can declare what it needs.
 
 This is especially important because Corant is a native desktop application with access to the user's filesystem and terminal.
+
+### External plugin loading — current
+
+Packages are discovered in Tauri `app_data_dir()/plugins/<id>/`. Each has `manifest.json` and a bundled, self-contained `.js`/`.mjs` entrypoint. Rust handles bounded file reads, SHA-256 fingerprints, installation without overwriting, and removal restricted to the managed directory. Paths/links are validated and `corant.*` is reserved. Installation copies the manifest and entrypoint only.
+
+The frontend imports entrypoint source as an ES module through a Blob URL, adapts named `activate`/optional `deactivate` exports to `PluginDefinition`, and delegates lifecycle/resources/permissions to `PluginHost`. Runtime React is provided as the optional second activation argument. Relative module imports, npm resolution and build steps are not performed at runtime.
+
+**Run → Manage plugins** offers install-from-folder, discovery refresh, enable, disable and remove. New packages are disabled; explicit approval covers the displayed permissions and the exact package fingerprint. Enablement is stored per project. Previously approved unchanged packages reactivate when the workspace opens; modified packages require renewed approval. The manager cancels late activation on workspace disposal and serializes management operations. Rendering failures are contained by a panel error boundary.
+
+These are trusted in-process plugins, not isolated extensions. API grants are cooperative, not a boundary against direct JavaScript/native API access. Deactivation revokes the context and requests cleanup; arbitrary side effects and synchronous loops cannot be forcibly undone. Marketplace, signatures, archive installation, process isolation and automatic updates are not included. See `docs/PLUGINS.md` and `examples/plugins/example.word-count`.
 
 ### Community vs native features
 
@@ -591,7 +602,9 @@ The exact interaction model still needs implementation details, but files should
 
 ## 16. Preview system
 
-Corant should support previewing files according to their type.
+Current: PNG, JPG/JPEG, GIF, WebP, AVIF, BMP, ICO, TIFF/TIF and SVG open in image preview tabs, with fit-to-view, original size and dimensions. Reads are limited to 32 MiB (80 MiB for TIFF) and remain subject to the project's filesystem scope. SVG uses an isolated image element, not inline markup or an embedded document, and supports switching to the text editor and back. Previewing does not write binary files; SVG source edits retain autosave/recovery. Object URLs are released on replacement/unmount and late reads are discarded.
+
+Additional previews remain planned.
 
 Examples may include:
 
@@ -1050,7 +1063,7 @@ This is the agreed initial implementation order.
 
 The broader Corant concept also includes the following planned capabilities:
 
-- image editor
+- further image editing features, including persistent layer documents and color management
 - archive import/export
 - drag-and-drop import
 - preview by file type
@@ -1193,10 +1206,10 @@ This list is a working map rather than a guarantee that no other files matter.
 | Project content search | Current |
 | Functional menus | Current; Run exposes registered plugin commands; task runner planned |
 | Integrated terminal | Current (Windows) |
-| Image editor | Planned |
+| Image editor | Implemented; persistent layer documents and color management planned |
 | Import/export archives | Planned |
 | Drag-and-drop import | Planned |
-| File previews | Planned |
+| File previews | Images, TIFF and SVG implemented; additional formats planned |
 | Workspace settings | Planned |
 | History/versioning | Planned |
 | Custom shortcuts | Planned |

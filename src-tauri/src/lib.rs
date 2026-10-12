@@ -6,6 +6,8 @@ mod codex_agent;
 #[cfg(windows)]
 mod codex_models;
 mod native_plugins;
+mod native_images;
+mod external_plugins;
 mod terminal;
 
 #[tauri::command]
@@ -102,6 +104,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(terminal::TerminalManager::default())
         .manage(native_plugins::NativePlugins::default())
+        .manage(external_plugins::PluginCatalog::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -117,6 +120,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             allow_project_directory,
             create_project_directory,
+            external_plugins::external_plugins_list,
+            external_plugins::external_plugins_install,
+            external_plugins::external_plugins_remove,
+            external_plugins::external_plugins_load,
+            native_images::image_read_tiff,
+            native_images::image_export,
             terminal::terminal_start,
             terminal::terminal_input,
             terminal::terminal_resize,

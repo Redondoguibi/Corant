@@ -65,7 +65,9 @@ test("SVG renders inertly and can switch to code, edit and preview the current c
   await expect(page.locator(".monaco-editor")).toBeVisible();
   await page.getByRole("menubar").getByRole("menuitem", { name: "Editar", exact: true }).click();
   await page.getByRole("menuitem", { name: "Selecionar tudo", exact: true }).click();
-  await page.keyboard.insertText('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><rect width="120" height="60" fill="blue"/></svg>');
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.evaluate(() => navigator.clipboard.writeText('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><rect width="120" height="60" fill="blue"/></svg>'));
+  await page.keyboard.press("Control+v");
   await expect.poll(() => page.evaluate(() => (window as any).testState.files["/project/vector.svg"])).toBe('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><rect width="120" height="60" fill="blue"/></svg>');
   await page.getByRole("button", { name: "Visualizar SVG", exact: true }).click();
   await expect(page.getByText("120 × 60 px", { exact: true })).toBeVisible();
